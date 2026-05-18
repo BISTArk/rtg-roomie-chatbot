@@ -5,6 +5,7 @@ import type { CatalogDataset } from "@/lib/platform-types";
 const DEFAULT_API_VERSION = process.env.SHOPIFY_API_VERSION?.trim() || "2025-10";
 const DEFAULT_SCOPES = process.env.SHOPIFY_SCOPES?.trim() || "read_products";
 const OAUTH_STATE_TTL_MS = 1000 * 60 * 10;
+const FALLBACK_API_VERSIONS = ["2026-04", "2026-01", "2025-10", "2025-07", "2025-04"];
 
 export interface ShopifyAppConfig {
   apiKey: string;
@@ -94,34 +95,52 @@ async function runShopifyGraphQl<T>(input: {
   query: string;
   variables?: Record<string, unknown>;
 }): Promise<T> {
-  const response = await fetch(
-    `https://${input.shop}/admin/api/${input.config.apiVersion}/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": input.accessToken,
-      },
-      body: JSON.stringify({
-        query: input.query,
-        variables: input.variables ?? {},
-      }),
-      cache: "no-store",
+  const versionsToTry = getShopifyApiVersionsToTry(input.config.apiVersion);
+  let lastError: Error | null = null;
+
+  for (const apiVersion of versionsToTry) {
+    const response = await fetch(
+      `https://${input.shop}/admin/api/${apiVersion}/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": input.accessToken,
+        },
+        body: JSON.stringify({
+          query: input.query,
+          variables: input.variables ?? {},
+        }),
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      if ((response.status === 400 || response.status === 404) && apiVersion !== versionsToTry[versionsToTry.length - 1]) {
+        lastError = new Error(`Shopify GraphQL request failed with status ${response.status} using API version ${apiVersion}.`);
+        continue;
+      }
+      throw new Error(`Shopify GraphQL request failed with status ${response.status}.`);
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`Shopify GraphQL request failed with status ${response.status}.`);
+    const body = (await response.json()) as ShopifyGraphQlResponse<T>;
+    if (body.errors?.length) {
+      throw new Error(body.errors.map((error) => error.message || "Unknown Shopify GraphQL error").join(", "));
+    }
+    if (!body.data) {
+      throw new Error("Shopify GraphQL request returned no data.");
+    }
+    return body.data;
   }
 
-  const body = (await response.json()) as ShopifyGraphQlResponse<T>;
-  if (body.errors?.length) {
-    throw new Error(body.errors.map((error) => error.message || "Unknown Shopify GraphQL error").join(", "));
-  }
-  if (!body.data) {
-    throw new Error("Shopify GraphQL request returned no data.");
-  }
-  return body.data;
+  throw lastError || new Error("Shopify GraphQL request failed.");
+}
+
+function getShopifyApiVersionsToTry(preferredVersion: string): string[] {
+  const values = [preferredVersion, ...FALLBACK_API_VERSIONS]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return [...new Set(values)];
 }
 
 export async function buildCatalogDatasetFromShopify(input: {
@@ -387,46 +406,57 @@ export async function fetchShopifyShopDetails(input: {
   accessToken: string;
   config: ShopifyAppConfig;
 }): Promise<ShopifyShopDetails> {
-  const response = await fetch(
-    `https://${input.shop}/admin/api/${input.config.apiVersion}/shop.json`,
-    {
-      headers: {
-        "X-Shopify-Access-Token": input.accessToken,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
+  const versionsToTry = getShopifyApiVersionsToTry(input.config.apiVersion);
+  let lastError: Error | null = null;
+
+  for (const apiVersion of versionsToTry) {
+    const response = await fetch(
+      `https://${input.shop}/admin/api/${apiVersion}/shop.json`,
+      {
+        headers: {
+          "X-Shopify-Access-Token": input.accessToken,
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      if ((response.status === 400 || response.status === 404) && apiVersion !== versionsToTry[versionsToTry.length - 1]) {
+        lastError = new Error(`Could not load Shopify shop details with API version ${apiVersion} (status ${response.status}).`);
+        continue;
+      }
+      throw new Error(`Could not load Shopify shop details (status ${response.status}).`);
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`Could not load Shopify shop details (status ${response.status}).`);
-  }
-
-  const data = (await response.json()) as {
-    shop?: {
-      id: number;
-      name: string;
-      email?: string;
-      myshopify_domain?: string;
-      primary_domain?: { host?: string };
-      shop_owner?: string;
-      currency?: string;
+    const data = (await response.json()) as {
+      shop?: {
+        id: number;
+        name: string;
+        email?: string;
+        myshopify_domain?: string;
+        primary_domain?: { host?: string };
+        shop_owner?: string;
+        currency?: string;
+      };
     };
-  };
 
-  if (!data.shop?.id || !data.shop.name || !data.shop.myshopify_domain) {
-    throw new Error("Shopify shop details response was incomplete.");
+    if (!data.shop?.id || !data.shop.name || !data.shop.myshopify_domain) {
+      throw new Error("Shopify shop details response was incomplete.");
+    }
+
+    return {
+      id: data.shop.id,
+      name: data.shop.name,
+      email: data.shop.email,
+      myshopifyDomain: data.shop.myshopify_domain,
+      primaryDomainHost: data.shop.primary_domain?.host,
+      shopOwner: data.shop.shop_owner,
+      currencyCode: data.shop.currency,
+    };
   }
 
-  return {
-    id: data.shop.id,
-    name: data.shop.name,
-    email: data.shop.email,
-    myshopifyDomain: data.shop.myshopify_domain,
-    primaryDomainHost: data.shop.primary_domain?.host,
-    shopOwner: data.shop.shop_owner,
-    currencyCode: data.shop.currency,
-  };
+  throw lastError || new Error("Could not load Shopify shop details.");
 }
 
 export function verifyShopifyWebhookSignature(input: {

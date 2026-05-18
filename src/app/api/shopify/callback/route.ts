@@ -33,11 +33,40 @@ export async function GET(request: NextRequest) {
     }
 
     const token = await exchangeShopifyCodeForAccessToken({ shop, code, config });
-    const shopDetails = await fetchShopifyShopDetails({
-      shop,
-      accessToken: token.accessToken,
-      config,
-    });
+    let shopDetails: {
+      myshopifyDomain: string;
+      name: string;
+      primaryDomainHost?: string | null;
+      shopOwner?: string | null;
+      email?: string | null;
+      currencyCode?: string | null;
+    };
+
+    try {
+      const fetched = await fetchShopifyShopDetails({
+        shop,
+        accessToken: token.accessToken,
+        config,
+      });
+      shopDetails = {
+        myshopifyDomain: fetched.myshopifyDomain,
+        name: fetched.name,
+        primaryDomainHost: fetched.primaryDomainHost,
+        shopOwner: fetched.shopOwner,
+        email: fetched.email,
+        currencyCode: fetched.currencyCode,
+      };
+    } catch (error) {
+      console.error("[shopify callback] failed to fetch shop details, continuing with fallback values:", error);
+      shopDetails = {
+        myshopifyDomain: shop,
+        name: shop.replace(/\.myshopify\.com$/, "") || shop,
+        primaryDomainHost: null,
+        shopOwner: null,
+        email: null,
+        currencyCode: null,
+      };
+    }
 
     const tenant = await upsertTenantFromShopifyInstall({
       shopDomain: shopDetails.myshopifyDomain,
