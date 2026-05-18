@@ -3,7 +3,7 @@ import { MockContextPanel } from "@/components/MockContextPanel";
 import { ShopifyAuthRedirect } from "@/components/ShopifyAuthRedirect";
 import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
-import { normalizeShopifyShopDomain } from "@/lib/shopify";
+import { getShopifyAppConfig, normalizeShopifyShopDomain } from "@/lib/shopify";
 import { getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
 
 export default async function Home({
@@ -20,10 +20,11 @@ export default async function Home({
     const tenant = await getTenantByShopifyShopDomain(shop);
 
     if (!tenant?.shopifyInstallation || tenant.shopifyInstallation.status !== "installed") {
+      const appConfig = getShopifyAppConfig();
       return (
         <ShopifyAuthRedirect
           shop={shop}
-          installUrl={`/api/shopify/install?shop=${encodeURIComponent(shop)}`}
+          installUrl={`${appConfig.appUrl}/api/shopify/install?shop=${encodeURIComponent(shop)}`}
         />
       );
     }
