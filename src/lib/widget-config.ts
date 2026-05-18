@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 
 export type LogoMode = "none" | "initials" | "image";
+export type WidgetPlacement = "bottom-right" | "bottom-left";
 
 export interface WidgetTheme {
   accent: string;
@@ -36,6 +37,7 @@ export interface WidgetBranding {
 
 export interface ShopAssistChatConfig {
   tenantKey?: string;
+  placement?: WidgetPlacement;
   theme?: Partial<WidgetTheme>;
   branding?: Partial<WidgetBranding>;
 }

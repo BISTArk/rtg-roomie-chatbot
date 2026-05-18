@@ -16,6 +16,11 @@ function hostnameFromUrl(value: string | null | undefined): string {
   }
 }
 
+function normalizePlacement(value: string | null | undefined): "bottom-right" | "bottom-left" | undefined {
+  const raw = clean(value).toLowerCase();
+  return raw === "bottom-left" || raw === "bottom-right" ? raw : undefined;
+}
+
 export async function GET(request: NextRequest) {
   const shop = clean(request.nextUrl.searchParams.get("shop"));
   if (!shop) {
@@ -47,6 +52,7 @@ export async function GET(request: NextRequest) {
   const config = {
     tenantKey: tenantKey || undefined,
     shopDomain: shop,
+    placement: normalizePlacement(request.nextUrl.searchParams.get("placement")),
     theme: {
       accent: clean(request.nextUrl.searchParams.get("accent")) || undefined,
       accentText: clean(request.nextUrl.searchParams.get("accentText")) || undefined,

@@ -17,7 +17,7 @@ This folder contains a minimal Shopify Theme App Embed block scaffold for the ch
 
 1. Create or open your Shopify app extension project.
 2. Copy `blocks/shop-assist.liquid` into the extension's `blocks/` folder.
-3. Replace the default `app_base_url` value with your production Vercel URL if needed.
+3. Deploy the app using the matching Shopify config so the embed script URL is injected automatically from `application_url`.
 4. Deploy the app extension through your Shopify app workflow.
 5. In the merchant's Theme Editor, enable the app embed and save.
 

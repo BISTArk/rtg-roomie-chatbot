@@ -3,14 +3,15 @@
   assign header_title = block.settings.header_title | default: 'Shopping Assistant'
   assign assistant_name = block.settings.assistant_name | default: 'Shopping Assistant'
   assign input_placeholder = block.settings.input_placeholder | default: 'Ask about products...'
+  assign placement = block.settings.placement | default: 'bottom-right'
   assign accent = block.settings.accent | default: '#1f1f1f'
   assign accent_text = block.settings.accent_text | default: '#ffffff'
-  assign app_base_url = block.settings.app_base_url | strip
+  assign app_base_url = 'https://rtg-roomie-chatbot-x5el.vercel.app'
 %}
 
 {% if app_base_url != blank %}
   <script
-    src="{{ app_base_url }}/api/shopify/theme-embed?shop={{ shop.permanent_domain | url_encode }}&launcherLabel={{ launcher_label | url_encode }}&headerTitle={{ header_title | url_encode }}&assistantName={{ assistant_name | url_encode }}&inputPlaceholder={{ input_placeholder | url_encode }}&accent={{ accent | url_encode }}&accentText={{ accent_text | url_encode }}"
+    src="{{ app_base_url }}/api/shopify/theme-embed?shop={{ shop.permanent_domain | url_encode }}&launcherLabel={{ launcher_label | url_encode }}&headerTitle={{ header_title | url_encode }}&assistantName={{ assistant_name | url_encode }}&inputPlaceholder={{ input_placeholder | url_encode }}&placement={{ placement | url_encode }}&accent={{ accent | url_encode }}&accentText={{ accent_text | url_encode }}"
     defer
     data-shop="{{ shop.permanent_domain | escape }}"
   ></script>
@@ -21,12 +22,6 @@
   "name": "Shop Assist",
   "target": "body",
   "settings": [
-    {
-      "type": "text",
-      "id": "app_base_url",
-      "label": "App base URL",
-      "default": "https://your-app.vercel.app"
-    },
     {
       "type": "text",
       "id": "assistant_name",
@@ -50,6 +45,22 @@
       "id": "input_placeholder",
       "label": "Input placeholder",
       "default": "Ask about products..."
+    },
+    {
+      "type": "radio",
+      "id": "placement",
+      "label": "Widget position",
+      "default": "bottom-right",
+      "options": [
+        {
+          "value": "bottom-right",
+          "label": "Bottom right"
+        },
+        {
+          "value": "bottom-left",
+          "label": "Bottom left"
+        }
+      ]
     },
     {
       "type": "color",

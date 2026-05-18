@@ -1169,6 +1169,38 @@ export async function getTenantShopifyInstallation(
   return withDb(async (client) => loadShopifyInstallation(client, tenantId));
 }
 
+export async function getTenantByShopifyShopDomain(
+  shopDomain: string | null | undefined
+): Promise<TenantRecord | null> {
+  const normalizedShopDomain = String(shopDomain || "").trim().toLowerCase();
+  if (!normalizedShopDomain || !hasDatabase()) return null;
+
+  await ensurePlatformSchema();
+  return withDb(async (client) => {
+    const installationResult = await client.query<ShopifyInstallationRow>(
+      `SELECT * FROM shopify_installations WHERE shop_domain = $1 LIMIT 1`,
+      [normalizedShopDomain]
+    );
+
+    const installationRow = installationResult.rows[0];
+    if (!installationRow?.tenant_id) return null;
+
+    const tenantResult = await client.query<TenantRow>(
+      `SELECT * FROM tenants WHERE id = $1 LIMIT 1`,
+      [installationRow.tenant_id]
+    );
+
+    const tenantRow = tenantResult.rows[0];
+    if (!tenantRow) return null;
+
+    return mapTenantRow(
+      tenantRow,
+      await loadTenantDomains(client, tenantRow.id),
+      mapShopifyInstallationRow(installationRow)
+    );
+  });
+}
+
 type CatalogSourceRow = {
   id: string;
   tenant_id: string;

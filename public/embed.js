@@ -57,6 +57,7 @@
     var next = {
       tenantKey: (base && base.tenantKey) || "",
       shopDomain: (base && base.shopDomain) || "",
+      placement: (base && base.placement) || "",
       theme: Object.assign({}, base && base.theme),
       branding: Object.assign({}, base && base.branding),
     };
@@ -65,6 +66,9 @@
     }
     if (override && typeof override.shopDomain === "string" && override.shopDomain.trim()) {
       next.shopDomain = override.shopDomain.trim();
+    }
+    if (override && (override.placement === "bottom-left" || override.placement === "bottom-right")) {
+      next.placement = override.placement;
     }
     if (override && override.theme && typeof override.theme === "object") {
       next.theme = Object.assign(next.theme, override.theme);
@@ -97,6 +101,7 @@
 
     var tenantKey = script.dataset.tenantKey || "";
     var shopDomain = script.dataset.shop || scriptParams.get("shop") || "";
+    var placement = script.dataset.placement || "";
     var theme = {};
     var branding = {};
     var themeJson = parseJSON(script.dataset.theme);
@@ -141,11 +146,20 @@
     if (script.dataset.logoUrl) branding.logoUrl = script.dataset.logoUrl;
     if (script.dataset.logoAlt) branding.logoAlt = script.dataset.logoAlt;
 
-    if (!tenantKey && Object.keys(theme).length === 0 && Object.keys(branding).length === 0) {
-      return shopDomain ? { tenantKey: "", shopDomain: shopDomain, theme: theme, branding: branding } : null;
+    if (!tenantKey && !placement && Object.keys(theme).length === 0 && Object.keys(branding).length === 0) {
+      return shopDomain ? { tenantKey: "", shopDomain: shopDomain, placement: "", theme: theme, branding: branding } : null;
     }
 
-    return { tenantKey: tenantKey, shopDomain: shopDomain, theme: theme, branding: branding };
+    return { tenantKey: tenantKey, shopDomain: shopDomain, placement: placement, theme: theme, branding: branding };
+  }
+
+  function normalizePlacement(value) {
+    var raw = String(value || "").trim().toLowerCase();
+    return raw === "bottom-left" ? "bottom-left" : "bottom-right";
+  }
+
+  function getEdgeStyle(placement) {
+    return placement === "bottom-left" ? "left:0" : "right:0";
   }
 
   function normalizeShopDomain(value) {
@@ -196,6 +210,7 @@
     window.location.hostname
   );
   var tenantKey = (widgetConfig.tenantKey || "").trim();
+  var placement = normalizePlacement(widgetConfig.placement);
   var storageNamespace = tenantKey || "shop-assist-unresolved";
 
   function scopedStorageKey(base) {
@@ -538,7 +553,7 @@
     var CLOSED_STYLE = [
       "position:fixed",
       "bottom:0",
-      "right:0",
+      getEdgeStyle(placement),
       "width:300px",
       "height:90px",
       "border:0",
@@ -550,7 +565,7 @@
     var OPEN_STYLE = [
       "position:fixed",
       "bottom:0",
-      "right:0",
+      getEdgeStyle(placement),
       "width:min(440px,100vw)",
       "height:min(720px,100vh)",
       "max-width:100vw",
