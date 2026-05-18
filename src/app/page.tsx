@@ -1,6 +1,8 @@
-import { redirect } from "next/navigation";
 import { ChatWidget } from "@/components/ChatWidget";
 import { MockContextPanel } from "@/components/MockContextPanel";
+import { ShopifyAuthRedirect } from "@/components/ShopifyAuthRedirect";
+import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { normalizeShopifyShopDomain } from "@/lib/shopify";
 import { getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
 
@@ -18,11 +20,29 @@ export default async function Home({
     const tenant = await getTenantByShopifyShopDomain(shop);
 
     if (!tenant?.shopifyInstallation || tenant.shopifyInstallation.status !== "installed") {
-      redirect(`/api/shopify/install?shop=${encodeURIComponent(shop)}`);
+      return (
+        <ShopifyAuthRedirect
+          shop={shop}
+          installUrl={`/api/shopify/install?shop=${encodeURIComponent(shop)}`}
+        />
+      );
     }
 
-    redirect(
-      `/shopify/installed?shop=${encodeURIComponent(shop)}`
+    const adminAuthenticated = await isAdminAuthenticated();
+    const tenantKey = adminAuthenticated ? tenant.tenantKey : "";
+    const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
+    const enableEmbedUrl =
+      shopifyApiKey
+        ? `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${encodeURIComponent(shopifyApiKey)}/shop-assist`
+        : "";
+
+    return (
+      <ShopifyInstalledView
+        shop={shop}
+        adminAuthenticated={adminAuthenticated}
+        tenantKey={tenantKey}
+        enableEmbedUrl={enableEmbedUrl}
+      />
     );
   }
 

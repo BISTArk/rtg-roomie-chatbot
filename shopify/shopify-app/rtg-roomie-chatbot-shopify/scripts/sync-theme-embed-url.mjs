@@ -37,7 +37,7 @@ if (!configArg) {
 }
 
 const configPath = path.resolve(projectRoot, configArg);
-const templatePath = path.join(projectRoot, "extensions", "chatbot", "blocks", "shop-assist.template.liquid");
+const templatePath = path.join(projectRoot, "templates", "shop-assist.template.liquid");
 const extensionBlockPath = path.join(projectRoot, "extensions", "chatbot", "blocks", "shop-assist.liquid");
 const scaffoldBlockPath = path.join(workspaceRoot, "shopify", "theme-app-extension", "blocks", "shop-assist.liquid");
 
