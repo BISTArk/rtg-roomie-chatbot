@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 
     const response = NextResponse.redirect(
       new URL(
-        `/shopify/installed?shop=${encodeURIComponent(shop)}&tenantKey=${encodeURIComponent(tenant.tenantKey)}&catalogSync=${encodeURIComponent(catalogSync)}`,
+        `/shopify/installed?shop=${encodeURIComponent(shop)}&catalogSync=${encodeURIComponent(catalogSync)}`,
         request.nextUrl.origin
       )
     );

@@ -22,7 +22,7 @@ export default async function Home({
     }
 
     redirect(
-      `/shopify/installed?shop=${encodeURIComponent(shop)}&tenantKey=${encodeURIComponent(tenant.tenantKey)}`
+      `/shopify/installed?shop=${encodeURIComponent(shop)}`
     );
   }
 
