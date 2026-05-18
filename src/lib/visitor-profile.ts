@@ -43,11 +43,11 @@ function emptyProfile(): VisitorProfile {
 function postToParent(profile: VisitorProfile) {
   if (!embedded) return;
   try {
-    window.parent.postMessage({ type: "rtg-save-profile", profile }, "*");
+    window.parent.postMessage({ type: "shop-assist-save-profile", profile }, "*");
   } catch { /* noop */ }
 }
 
-/** Called once when rtg-init arrives from embed.js */
+/** Called once when shop-assist-init arrives from embed.js */
 export function initProfileFromBridge(
   profile: VisitorProfile | null,
   isEmbed: boolean

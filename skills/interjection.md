@@ -120,7 +120,7 @@ Still weighing the **Beautyrest Harmony**? I'm here whenever you're ready to dec
 <div class="flex-wrap">
 <button class="pill" onclick="sendPrompt('Yes, lets continue')">✅ Yes, continue</button>
 <button class="pill" onclick="sendPrompt('Just browsing')">👋 Just browsing</button>
-<button class="pill" onclick="sendPrompt('Find me the nearest Rooms To Go store')">🏬 Visit in store</button>
+<button class="pill" onclick="sendPrompt('Help me find a store')">🏬 Visit in store</button>
 <button class="pill" onclick="sendPrompt('Talk to an agent')">💬 Talk to agent</button>
 </div>
 (three backticks)

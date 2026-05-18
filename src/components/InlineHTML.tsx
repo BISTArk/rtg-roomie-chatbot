@@ -6,7 +6,7 @@ import type { WidgetTheme } from "@/lib/widget-config";
 const IFRAME_BRIDGE_SCRIPT = `
 <script>
   function sendPrompt(text) {
-    window.parent.postMessage({ type: 'rtg-send-prompt', text: text }, '*');
+    window.parent.postMessage({ type: 'shop-assist-send-prompt', text: text }, '*');
   }
 
   var _selected = new Set();
@@ -25,26 +25,26 @@ const IFRAME_BRIDGE_SCRIPT = `
     if (_selected.size === 0) return;
     var items = Array.from(_selected);
     var text = (prefix || '') + items.join(', ');
-    window.parent.postMessage({ type: 'rtg-send-prompt', text: text.trim() }, '*');
+    window.parent.postMessage({ type: 'shop-assist-send-prompt', text: text.trim() }, '*');
   }
 
   function openProduct(url, productName) {
     if (!url) return;
-    window.parent.postMessage({ type: 'rtg-open-url', url: String(url).trim(), productName: productName || '' }, '*');
+    window.parent.postMessage({ type: 'shop-assist-open-url', url: String(url).trim(), productName: productName || '' }, '*');
   }
 
   function addToCart(variantId, quantity) {
     var q = quantity == null || quantity === '' ? 1 : Number(quantity);
     if (!(q >= 1) || q > 99) q = 1;
     window.parent.postMessage({
-      type: 'rtg-add-to-cart',
+      type: 'shop-assist-add-to-cart',
       variantId: variantId,
       quantity: Math.floor(q)
     }, '*');
   }
 
   function checkout() {
-    window.parent.postMessage({ type: 'rtg-checkout' }, '*');
+    window.parent.postMessage({ type: 'shop-assist-checkout' }, '*');
   }
 
   function askSimilar(productName) {
@@ -65,7 +65,7 @@ const IFRAME_BRIDGE_SCRIPT = `
     var h = measuredHeight() + 2;
     if (Math.abs(h - _lastSent) < 2) return;
     _lastSent = h;
-    window.parent.postMessage({ type: 'rtg-iframe-resize', height: h }, '*');
+    window.parent.postMessage({ type: 'shop-assist-iframe-resize', height: h }, '*');
   }
 
   new MutationObserver(notifyHeight).observe(document.body, {
@@ -84,8 +84,8 @@ const IFRAME_BRIDGE_SCRIPT = `
     var imgs = document.querySelectorAll('img');
     for (var i = 0; i < imgs.length; i++) {
       var img = imgs[i];
-      if (img.__rtgHooked) continue;
-      img.__rtgHooked = true;
+      if (img.__shopAssistHooked) continue;
+      img.__shopAssistHooked = true;
       img.addEventListener('load', notifyHeight);
       img.addEventListener('error', notifyHeight);
     }
@@ -99,8 +99,8 @@ const IFRAME_BRIDGE_SCRIPT = `
     var cards = document.querySelectorAll('.card');
     for (var i = 0; i < cards.length; i++) {
       var card = cards[i];
-      if (card.__rtgEnhanced) continue;
-      card.__rtgEnhanced = true;
+      if (card.__shopAssistEnhanced) continue;
+      card.__shopAssistEnhanced = true;
 
       var media = card.querySelector('.card-media');
       var title = card.querySelector('.card-title');
@@ -414,7 +414,7 @@ export function InlineHTML({ html, id, theme, className }: InlineHTMLProps) {
 
   useEffect(() => {
     function handleMessage(e: MessageEvent) {
-      if (e.data?.type === "rtg-iframe-resize" && iframeRef.current) {
+      if (e.data?.type === "shop-assist-iframe-resize" && iframeRef.current) {
         if (e.source === iframeRef.current.contentWindow) {
           setHeight(Math.min(Math.max(e.data.height, 20), 2000));
         }

@@ -19,7 +19,7 @@ function hostnameFromUrl(value: string | null | undefined): string {
 export async function GET(request: NextRequest) {
   const shop = clean(request.nextUrl.searchParams.get("shop"));
   if (!shop) {
-    return new Response("console.error('RTG theme embed: missing shop parameter.');", {
+    return new Response("console.error('Shop Assist theme embed: missing shop parameter.');", {
       headers: {
         "Content-Type": "application/javascript; charset=utf-8",
       },
@@ -62,9 +62,9 @@ export async function GET(request: NextRequest) {
   const body = `
 (function () {
   var cfg = ${JSON.stringify(config)};
-  window.RTG_CHAT_CONFIG = Object.assign({}, window.RTG_CHAT_CONFIG || {}, cfg, {
-    theme: Object.assign({}, (window.RTG_CHAT_CONFIG && window.RTG_CHAT_CONFIG.theme) || {}, cfg.theme || {}),
-    branding: Object.assign({}, (window.RTG_CHAT_CONFIG && window.RTG_CHAT_CONFIG.branding) || {}, cfg.branding || {})
+  window.SHOP_ASSIST_CONFIG = Object.assign({}, window.SHOP_ASSIST_CONFIG || {}, cfg, {
+    theme: Object.assign({}, (window.SHOP_ASSIST_CONFIG && window.SHOP_ASSIST_CONFIG.theme) || {}, cfg.theme || {}),
+    branding: Object.assign({}, (window.SHOP_ASSIST_CONFIG && window.SHOP_ASSIST_CONFIG.branding) || {}, cfg.branding || {})
   });
   var script = document.createElement('script');
   script.src = ${JSON.stringify(scriptUrl.toString())};

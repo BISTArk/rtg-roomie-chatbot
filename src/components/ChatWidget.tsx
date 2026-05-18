@@ -31,7 +31,7 @@ import {
 } from "@/lib/visitor-profile";
 import type { PageContext, BrowsingHistoryEntry } from "@/lib/system-prompt";
 import {
-  RTG_PAGE_CONTEXT_MESSAGE,
+  SHOP_ASSIST_PAGE_CONTEXT_MESSAGE,
   isAllowedContextMessageSource,
   sanitizeHostPageContext,
 } from "@/lib/page-context";
@@ -58,7 +58,7 @@ export type ChatMessage = PersistedChatMessage;
 
 export type { PageContext };
 
-const CHAT_ID = "rtg-roomie-chat";
+const CHAT_ID = "shop-assist-chat";
 const HANDOFF_PHRASES = [
   "talk to someone",
   "talk to a person",
@@ -123,7 +123,7 @@ function chatMessageToUi(m: ChatMessage): UIMessage {
 function getPageContext(): PageContext | null {
   if (typeof window === "undefined") return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ctx = (window as any).RTG_CHAT_CONTEXT;
+  const ctx = (window as any).SHOP_ASSIST_CONTEXT;
   if (!ctx) return null;
   return {
     page: ctx.page || "unknown",
@@ -215,7 +215,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [tenantToken, setTenantToken] = useState<string>("");
   const [sessionId, setSessionId] = useState<string>("");
   const [storageNamespace, setStorageNamespaceState] = useState<string>(
-    initialTenantKey || "rtg-unresolved"
+    initialTenantKey || "shop-assist-unresolved"
   );
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [browsingHistory, setBrowsingHistory] = useState<BrowsingHistoryEntry[]>([]);
@@ -247,7 +247,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   // Durable flag: set when user clicks the in-chat refresh icon. Blocks
   // "Welcome back, you were looking for..." greetings in both the same
   // session (handleOpen → generateReturningGreeting) and future sessions
-  // (rtg-init → triggerNewSessionGreeting returning path). Cleared when
+  // (shop-assist-init → triggerNewSessionGreeting returning path). Cleared when
   // the user sends their first message after the refresh. Storage is
   // bridged to embed.js → host localStorage so it persists across tabs
   // and reloads.
@@ -283,7 +283,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     // Tell embed.js to resize the iframe
     if (embed && typeof window !== "undefined" && window.parent !== window) {
       window.parent.postMessage(
-        { type: isOpen ? "rtg-widget-open" : "rtg-widget-close" },
+        { type: isOpen ? "shop-assist-widget-open" : "shop-assist-widget-close" },
         "*"
       );
     }
@@ -369,13 +369,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   // ── Message listener: handles bridge init, context updates, URL clicks, prompts ──
   useEffect(() => {
     async function handleMessage(e: MessageEvent) {
-      // rtg-init: full initialization from embed.js
-      if (e.data?.type === "rtg-init") {
+      // shop-assist-init: full initialization from embed.js
+      if (e.data?.type === "shop-assist-init") {
         const data = e.data;
         const incomingTenantKey =
           String(data.tenantKey || getRuntimeTenantKey()).trim();
         const incomingNamespace =
-          String(data.storageNamespace || incomingTenantKey || "rtg-unresolved").trim() || "rtg-unresolved";
+          String(data.storageNamespace || incomingTenantKey || "shop-assist-unresolved").trim() || "shop-assist-unresolved";
         setStorageNamespace(incomingNamespace);
         configureMessageStorageNamespace(incomingNamespace);
         configureProfileStorageNamespace(incomingNamespace);
@@ -498,7 +498,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         }
 
         // State 2 on full page load: Shopify themes typically do full page
-        // loads for product clicks, so RTG_PAGE_CONTEXT_MESSAGE won't fire
+        // loads for product clicks, so SHOP_ASSIST_PAGE_CONTEXT_MESSAGE won't fire
         // for the initial navigation. Schedule contextual here too.
         const initialCtx = data.pageContext as PageContext | undefined;
         const chatWillBeOpen = data.widgetOpen || data.isSharedChat;
@@ -512,7 +512,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       }
 
       // Page context update (from embed.js on SPA navigation or async data)
-      if (e.data?.type === RTG_PAGE_CONTEXT_MESSAGE) {
+      if (e.data?.type === SHOP_ASSIST_PAGE_CONTEXT_MESSAGE) {
         if (!isAllowedContextMessageSource(e.source)) return;
         const sanitized = sanitizeHostPageContext(e.data.context);
         if (!sanitized) return;
@@ -522,9 +522,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
         // Also update window context for standalone compatibility
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (window as any).RTG_CHAT_CONTEXT = {
+        (window as any).SHOP_ASSIST_CONTEXT = {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ...(window as any).RTG_CHAT_CONTEXT,
+          ...(window as any).SHOP_ASSIST_CONTEXT,
           ...sanitized,
         };
         const ctx = sanitized;
@@ -559,7 +559,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       // State 3 interjection from embed.js scheduler (chat closed + time
       // threshold hit). Auto-open the chat and fire the matching API call.
-      if (e.data?.type === "rtg-interjection" && typeof e.data.interjectionType === "string") {
+      if (e.data?.type === "shop-assist-interjection" && typeof e.data.interjectionType === "string") {
         const type = e.data.interjectionType as string;
         setIsOpen(true);
         setTimeout(() => {
@@ -570,7 +570,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       // Activity pulse from embed.js (throttled to 1 per 5s on host side).
       // Used for State 1 IDLE detection and re-engagement trigger.
-      if (e.data?.type === "rtg-activity") {
+      if (e.data?.type === "shop-assist-activity") {
         const now = Date.now();
         const wasIdle = isIdleRef.current;
         isIdleRef.current = false;
@@ -586,13 +586,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       }
 
       // Shopify cart / checkout from InlineHTML iframe (relay to host embed.js)
-      if (e.data?.type === "rtg-add-to-cart") {
+      if (e.data?.type === "shop-assist-add-to-cart") {
         if (!embed || typeof window === "undefined" || window.parent === window) {
           return;
         }
         window.parent.postMessage(
           {
-            type: "rtg-add-to-cart",
+            type: "shop-assist-add-to-cart",
             variantId: e.data.variantId,
             quantity: e.data.quantity,
           },
@@ -604,7 +604,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       // Cart action result coming BACK from embed.js after it hit
       // Shopify's /cart/add.js. Surface a short acknowledgment in the
       // chat so the customer knows the cart action happened.
-      if (e.data?.type === "rtg-cart-action-result") {
+      if (e.data?.type === "shop-assist-cart-action-result") {
         const ok = !!e.data.ok;
         const productName = pageContextRef.current?.productName;
         const successText = productName
@@ -624,7 +624,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         // On success, schedule a cross-sell/upsell — but wait for the
         // cart refresh from embed.js before firing, so the AI sees the
         // item we just added when deciding what to suggest next. The
-        // next rtg-page-context-update (which embed.js sends after
+        // next shop-assist-page-context-update (which embed.js sends after
         // fetchCart completes) will trigger the upsell. 3s fallback
         // in case the context update is slow or fails.
         if (ok) {
@@ -641,16 +641,16 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         }
         return;
       }
-      if (e.data?.type === "rtg-checkout") {
+      if (e.data?.type === "shop-assist-checkout") {
         if (!embed || typeof window === "undefined" || window.parent === window) {
           return;
         }
-        window.parent.postMessage({ type: "rtg-checkout" }, "*");
+        window.parent.postMessage({ type: "shop-assist-checkout" }, "*");
         return;
       }
 
       // Product link click from InlineHTML iframe
-      if (e.data?.type === "rtg-open-url" && typeof e.data.url === "string") {
+      if (e.data?.type === "shop-assist-open-url" && typeof e.data.url === "string") {
         const raw = e.data.url.trim();
         try {
           const parsed = new URL(raw);
@@ -662,7 +662,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
             if (embed) {
               // Send to embed.js: save pending product + navigate host page
               window.parent.postMessage({
-                type: "rtg-navigate",
+                type: "shop-assist-navigate",
                 url: parsed.href,
                 pendingProduct: productName ? { productName, url: parsed.href } : undefined,
               }, "*");
@@ -676,7 +676,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       }
 
       // Quick-reply prompt from InlineHTML iframe
-      if (e.data?.type === "rtg-send-prompt" && e.data.text) {
+      if (e.data?.type === "shop-assist-send-prompt" && e.data.text) {
         if (
           e.data.text === "__dismiss__" ||
           e.data.text.toLowerCase().includes("just browsing") ||
@@ -696,7 +696,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
   // ── Standalone init (non-embed mode) ──
   useEffect(() => {
-    if (embed) return; // embed mode waits for rtg-init message
+    if (embed) return; // embed mode waits for shop-assist-init message
 
     let cancelled = false;
     async function initStandalone() {
@@ -1000,7 +1000,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   );
 
   // Reusable: schedule a State 2 contextual commentary after the dwell gate.
-  // Called from the rtg-init handler (full page load), the page-context-update
+  // Called from the shop-assist-init handler (full page load), the page-context-update
   // handler (SPA nav), and handleOpen (user opens chat while on a PDP).
   const scheduleContextualForPdp = useCallback((ctx: PageContext) => {
     if (ctx.page !== "pdp" || !ctx.productName) return;
@@ -1210,7 +1210,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       const wasIdle = isIdleRef.current;
       isIdleRef.current = false;
       lastActivityAtRef.current = now;
-      // Mirror the rtg-activity handler's re-engagement trigger so
+      // Mirror the shop-assist-activity handler's re-engagement trigger so
       // iframe-originated activity can also wake up a State 1 fire.
       if (wasIdle && !reengagementFiredRef.current && isOpenRef.current) {
         reengagementFiredRef.current = true;
@@ -1250,7 +1250,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     // via embed bridge (host localStorage) or standalone localStorage.
     suppressReturningRef.current = true;
     if (embed && typeof window !== "undefined" && window.parent !== window) {
-      window.parent.postMessage({ type: "rtg-set-suppress-returning" }, "*");
+      window.parent.postMessage({ type: "shop-assist-set-suppress-returning" }, "*");
     } else {
       try { localStorage.setItem(getScopedStorageKey("suppress_returning"), "1"); }
       catch { /* noop */ }
@@ -1390,7 +1390,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       if (suppressReturningRef.current) {
         suppressReturningRef.current = false;
         if (embed && typeof window !== "undefined" && window.parent !== window) {
-          window.parent.postMessage({ type: "rtg-clear-suppress-returning" }, "*");
+          window.parent.postMessage({ type: "shop-assist-clear-suppress-returning" }, "*");
         } else {
           try { localStorage.removeItem(getScopedStorageKey("suppress_returning")); }
           catch { /* noop */ }

@@ -185,7 +185,7 @@ Triggered when the customer taps "I'm all set" or "Ready to check out", OR when 
 
 One warm closing line + 3 tiles (no product cards).
 
-> "You're all set! 🎉 Everything's in your cart at **RoomsToGo.com** — you can head to checkout any time. Sleep well! 🌙"
+> "You're all set! 🎉 Everything's in your cart — you can head to checkout any time. Sleep well! 🌙"
 
 ```html
 <div class="flex-wrap">

@@ -7,7 +7,7 @@ export async function POST() {
   });
   response.headers.append(
     "Set-Cookie",
-    "rtg_admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+    "shop_assist_admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
   );
   return response;
 }

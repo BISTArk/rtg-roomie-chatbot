@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 
-const COOKIE_NAME = "rtg_admin_session";
+const COOKIE_NAME = "shop_assist_admin_session";
 const DEFAULT_DURATION_MS = 1000 * 60 * 60 * 12;
 
 function getAdminUser(): string {
@@ -13,7 +13,7 @@ function getAdminPassword(): string {
 }
 
 function getSecret(): string {
-  return process.env.ADMIN_SESSION_SECRET?.trim() || "roomie-admin-dev-secret";
+  return process.env.ADMIN_SESSION_SECRET?.trim() || "shop-assist-admin-dev-secret";
 }
 
 function sign(value: string): string {

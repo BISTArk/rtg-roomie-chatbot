@@ -50,11 +50,11 @@ export function MockContextPanel() {
   useEffect(() => {
     if (mockContext) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).RTG_CHAT_CONTEXT = { ...mockContext };
+      (window as any).SHOP_ASSIST_CONTEXT = { ...mockContext };
       return;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (window as any).RTG_CHAT_CONTEXT;
+    delete (window as any).SHOP_ASSIST_CONTEXT;
   }, [mockContext]);
 
   const applyPreset = (name: string) => {
@@ -70,7 +70,7 @@ export function MockContextPanel() {
       // Trigger a visit record with the purchase data
       window.postMessage(
         {
-          type: "rtg-page-context-update",
+          type: "shop-assist-page-context-update",
           context: preset,
         },
         "*"
@@ -83,8 +83,8 @@ export function MockContextPanel() {
     setSelectedPreset("");
     setApplied("");
     // Clear visitor profile cookie
-    document.cookie = "rtg_visitor_profile=;path=/;max-age=0";
-    document.cookie = "rtg_proactive_dismissed=;path=/;max-age=0";
+    document.cookie = "shop_assist_visitor_profile=;path=/;max-age=0";
+    document.cookie = "shop_assist_proactive_dismissed=;path=/;max-age=0";
   };
 
   return (
@@ -103,8 +103,8 @@ export function MockContextPanel() {
         🧪 Test Panel — Simulate Page Context
       </h3>
       <p className="mb-3 text-xs" style={{ color: "var(--widget-text-muted)" }}>
-        Set <code>window.RTG_CHAT_CONTEXT</code> to simulate different pages on
-        roomstogo.com. Refresh the chat widget after changing.
+        Set <code>window.SHOP_ASSIST_CONTEXT</code> to simulate different storefront pages.
+        Refresh the chat widget after changing.
       </p>
       <div className="flex flex-wrap gap-2">
         {Object.keys(PRESETS).map((name) => (

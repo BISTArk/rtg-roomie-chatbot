@@ -17,7 +17,7 @@ let messageCache: ChatMessage[] = [];
 let embedded = false;
 let initialized = false;
 
-/** Called once by ChatWidget when rtg-init arrives from embed.js */
+/** Called once by ChatWidget when shop-assist-init arrives from embed.js */
 export function initFromBridge(messages: ChatMessage[] | null, isEmbed: boolean) {
   embedded = isEmbed;
   if (messages && messages.length > 0) {
@@ -49,7 +49,7 @@ export function saveMessages(messages: ChatMessage[]) {
   messageCache = toSave;
 
   if (embedded) {
-    postToParent("rtg-save-messages", { messages: toSave });
+    postToParent("shop-assist-save-messages", { messages: toSave });
   } else {
     try { localStorage.setItem(getScopedStorageKey(STORAGE_KEY), JSON.stringify(toSave)); }
     catch { /* quota */ }
@@ -80,7 +80,7 @@ export function loadMessages(): ChatMessage[] | null {
 export function clearMessages() {
   messageCache = [];
   if (embedded) {
-    postToParent("rtg-clear-messages");
+    postToParent("shop-assist-clear-messages");
   } else {
     try { localStorage.removeItem(getScopedStorageKey(STORAGE_KEY)); }
     catch { /* noop */ }

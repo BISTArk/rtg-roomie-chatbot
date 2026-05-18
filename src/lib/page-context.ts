@@ -1,7 +1,7 @@
 import type { PageContext, BrowsingHistoryEntry } from "@/lib/system-prompt";
 
 /** Parent → iframe postMessage type (see public/embed.js). */
-export const RTG_PAGE_CONTEXT_MESSAGE = "rtg-page-context-update" as const;
+export const SHOP_ASSIST_PAGE_CONTEXT_MESSAGE = "shop-assist-page-context-update" as const;
 
 const PAGE_TYPES = new Set<PageContext["page"]>([
   "pdp",
@@ -50,7 +50,7 @@ function historyArr(v: unknown): BrowsingHistoryEntry[] | undefined {
 
 /**
  * Validates data from the parent page (postMessage) before merging into
- * `window.RTG_CHAT_CONTEXT`. Rejects prototype pollution and oversized values.
+ * `window.SHOP_ASSIST_CONTEXT`. Rejects prototype pollution and oversized values.
  */
 export function sanitizeHostPageContext(raw: unknown): PageContext | null {
   if (!raw || typeof raw !== "object") return null;

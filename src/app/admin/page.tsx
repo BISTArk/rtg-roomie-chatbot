@@ -13,7 +13,7 @@ function getShopifyConnectDomain(domains: string[]): string {
 }
 
 function isSeededDemoTenant(tenantKey: string): boolean {
-  return tenantKey === "rtg-default";
+  return tenantKey === "shop-assist-demo";
 }
 
 export default async function AdminPage() {
@@ -127,7 +127,7 @@ export default async function AdminPage() {
           >
             <h2 className="text-xl font-semibold">Internal demo tenant</h2>
             <p className="mt-2 text-sm" style={{ color: "var(--widget-text-muted)" }}>
-              The seeded `rtg-default` demo tenant is hidden from the merchant tenant list so it does not get confused with real Shopify stores.
+              The seeded `shop-assist-demo` tenant is hidden from the merchant tenant list so it does not get confused with real Shopify stores.
             </p>
           </section>
         ) : null}

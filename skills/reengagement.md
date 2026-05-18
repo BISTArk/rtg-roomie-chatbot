@@ -28,7 +28,7 @@ Welcome back! You were weighing the **Beautyrest Harmony** for your back pain �
 <div class="flex-wrap">
 <button class="pill" onclick="sendPrompt('Yes, show me the alternatives')">✅ Yes, show me</button>
 <button class="pill" onclick="sendPrompt('Just browsing')">👋 Just browsing</button>
-<button class="pill" onclick="sendPrompt('Find me the nearest Rooms To Go store')">🏬 Visit in store</button>
+<button class="pill" onclick="sendPrompt('Help me find a store')">🏬 Visit in store</button>
 <button class="pill" onclick="sendPrompt('Talk to an agent')">💬 Talk to agent</button>
 </div>
 (three backticks)

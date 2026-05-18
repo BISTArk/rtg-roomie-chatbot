@@ -92,7 +92,7 @@ export function getAccessoryData(): string {
       "- BaseLogic Platinum: Mid-tier (adds massage, USB, wireless remote).",
       "- Tempur-Ergo 3.0 / 3.0 Smart / ProSmart: Premium tier.",
       "- Adapt Pro-LO / Pro-HI / ProAdjust: Tempur-Pedic-compatible premium bases.",
-      "- RTG-Sleep 2900 / 3900 / 5900: RTG's own performance tier.",
+      "- House-label performance tiers: merchant-specific premium adjustable-base lineup.",
       "- EASE 4.0: Stearns & Foster base option.",
       ""
     );

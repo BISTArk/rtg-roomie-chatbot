@@ -1,5 +1,5 @@
 {
-  "name": "rtg-roomie-chatbot-shopify",
+  "name": "shop-assist-shopify",
   "version": "1.0.0",
   "license": "UNLICENSED",
   "scripts": {
@@ -8,7 +8,9 @@
     "dev": "shopify app dev",
     "info": "shopify app info",
     "generate": "shopify app generate",
-    "deploy": "shopify app deploy"
+    "deploy": "shopify app deploy",
+    "deploy:rtg": "shopify app deploy --config shopify.app.rtg.toml",
+    "deploy:florida-mattress": "shopify app deploy --config shopify.app.florida-mattress.toml"
   },
   "dependencies": {},
   "trustedDependencies": [

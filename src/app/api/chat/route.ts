@@ -103,7 +103,7 @@ function sanitizeForModel(
 
   // If the static welcome was in the messages, inject it as a synthetic
   // assistant message at the start so the AI knows it already greeted.
-  // This prevents the double-intro ("I'm Roomie" twice).
+  // This prevents the double-intro ("I'm Shop Assist" twice).
   if (hasWelcome) {
     cleaned.unshift({
       role: "assistant",
@@ -274,7 +274,7 @@ export async function POST(request: Request) {
   let tenant;
   try {
     tenant = await resolveTenantFromToken(
-      String(tenantKey || "").trim() || "rtg-default",
+      String(tenantKey || "").trim() || "shop-assist-demo",
       request.headers.get("x-tenant-token")
     );
   } catch (error) {

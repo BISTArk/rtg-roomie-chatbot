@@ -34,7 +34,7 @@ export interface WidgetBranding {
   logoAlt?: string;
 }
 
-export interface RTGChatConfig {
+export interface ShopAssistChatConfig {
   tenantKey?: string;
   theme?: Partial<WidgetTheme>;
   branding?: Partial<WidgetBranding>;
@@ -82,7 +82,7 @@ export const DEFAULT_WIDGET_BRANDING: WidgetBranding = {
   logoAlt: "Shopping Assistant",
 };
 
-export const RTG_WIDGET_THEME: WidgetTheme = {
+export const SHOP_ASSIST_WIDGET_THEME: WidgetTheme = {
   accent: "#003DA5",
   accentHover: "#002D7A",
   accentText: "#ffffff",
@@ -102,10 +102,10 @@ export const RTG_WIDGET_THEME: WidgetTheme = {
   shadow: "0 18px 48px rgba(0, 0, 0, 0.18)",
 };
 
-export const RTG_WIDGET_BRANDING: WidgetBranding = {
-  assistantName: "Roomie",
-  launcherLabel: "Shopping Assistant",
-  headerTitle: "Shopping Assistant",
+export const SHOP_ASSIST_WIDGET_BRANDING: WidgetBranding = {
+  assistantName: "Shop Assist",
+  launcherLabel: "Shop Assist",
+  headerTitle: "Shop Assist",
   inputPlaceholder: "Ask about mattresses...",
   humanModeBannerText:
     "You are now connected to a human agent. Refresh to resume AI assistant.",
@@ -115,9 +115,8 @@ export const RTG_WIDGET_BRANDING: WidgetBranding = {
     "Just browsing",
     "What's popular?",
   ],
-  logoMode: "image",
-  logoUrl: "/rtg-logo.svg",
-  logoAlt: "Roomie logo",
+  logoMode: "initials",
+  logoAlt: "Shop Assist",
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -207,7 +206,7 @@ export function resolveWidgetConfig(config?: unknown): ResolvedWidgetConfig {
 }
 
 export function mergeWidgetConfigLayers(
-  ...configs: Array<RTGChatConfig | null | undefined>
+  ...configs: Array<ShopAssistChatConfig | null | undefined>
 ): ResolvedWidgetConfig {
   return configs.reduce<ResolvedWidgetConfig>(
     (resolved, config) => {
@@ -231,9 +230,9 @@ export function mergeWidgetConfigLayers(
   );
 }
 
-export function getWindowChatConfig(): RTGChatConfig | undefined {
+export function getWindowChatConfig(): ShopAssistChatConfig | undefined {
   if (typeof window === "undefined") return undefined;
-  const config = window.RTG_CHAT_CONFIG;
+  const config = window.SHOP_ASSIST_CONFIG;
   return config && typeof config === "object" ? config : undefined;
 }
 

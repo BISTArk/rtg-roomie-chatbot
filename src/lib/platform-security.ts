@@ -27,7 +27,7 @@ function getSigningSecret(): string {
   return (
     process.env.TENANT_TOKEN_SECRET ||
     process.env.ADMIN_SESSION_SECRET ||
-    "roomie-dev-secret-change-me"
+    "shop-assist-dev-secret-change-me"
   );
 }
 

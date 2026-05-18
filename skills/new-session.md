@@ -21,7 +21,7 @@ Replace `(three backticks)` with actual ``` fences in your output.
 
 ---START EXAMPLE---
 
-Hi! 👋 I'm Roomie, your Rooms To Go mattress assistant — here to help you find the perfect match.
+Hi! 👋 I'm Shop Assist — here to help you find the right mattress.
 
 (three backticks)html
 <div class="flex-wrap">

@@ -88,37 +88,21 @@ function applyTenantPromptConfig(
   content: string,
   config?: TenantPromptConfig
 ): string {
-  if (!config) return content;
+  const brandName = config?.brandName?.trim() || "the merchant";
+  return content.replaceAll("{{BRAND_NAME}}", brandName);
+}
 
-  let next = content;
-  const brandName = config.brandName?.trim() || "the store";
-  const websiteUrl = config.websiteUrl?.trim();
-  const supportUrl = config.supportUrl?.trim();
-  const storeLocatorUrl = config.storeLocatorUrl?.trim();
-  const handoffDescription = config.handoffDescription?.trim();
+function buildTenantPromptConfigBlock(config?: TenantPromptConfig): string {
+  const brandName = config?.brandName?.trim() || "the merchant";
+  const lines = [
+    `- Brand name: ${brandName}`,
+    config?.websiteUrl?.trim() ? `- Website URL: ${config.websiteUrl.trim()}` : null,
+    config?.supportUrl?.trim() ? `- Support URL: ${config.supportUrl.trim()}` : null,
+    config?.storeLocatorUrl?.trim() ? `- Store locator URL: ${config.storeLocatorUrl.trim()}` : null,
+    config?.handoffDescription?.trim() ? `- Human handoff team: ${config.handoffDescription.trim()}` : null,
+  ].filter(Boolean) as string[];
 
-  next = next.replaceAll("Rooms To Go", brandName);
-  if (supportUrl) {
-    next = next.replaceAll("roomstogo.com/help", supportUrl);
-    next = next.replaceAll("https://www.roomstogo.com/help", supportUrl);
-  }
-  if (storeLocatorUrl) {
-    next = next.replaceAll("https://www.roomstogo.com/stores", storeLocatorUrl);
-  }
-  if (websiteUrl) {
-    try {
-      const domain = new URL(websiteUrl).hostname;
-      next = next.replaceAll("roomstogo.com", domain);
-      next = next.replaceAll("https://www.roomstogo.com", websiteUrl.replace(/\/+$/, ""));
-    } catch {
-      /* ignore invalid website override */
-    }
-  }
-  if (handoffDescription) {
-    next = next.replaceAll("customer care", handoffDescription);
-  }
-
-  return next;
+  return `\n\n---\n\n# MERCHANT PROMPT CONFIG\n\nUse the merchant-specific details below whenever you reference the merchant, link to support, mention store visits, or describe human handoff options:\n${lines.join("\n")}`;
 }
 
 function buildTenantAiConfigBlock(config?: TenantAiConfig): string {
@@ -308,7 +292,7 @@ The syntax is: three backticks followed by "html", then your HTML, then three cl
 
 These JavaScript helpers are pre-loaded:
 - sendPrompt(text) — immediately sends text as a user chat message
-- openProduct(url, productName) — opens the Rooms To Go product page in the same browser tab. ALWAYS pass the product name as the second argument.
+- openProduct(url, productName) — opens the merchant product page in the same browser tab. ALWAYS pass the product name as the second argument.
 - addToCart(variantId, quantity) — **Shopify storefront embed only.** Adds a line item via the host store's \`/cart/add.js\`. \`variantId\` must be the numeric Shopify variant id (see page context). \`quantity\` defaults to 1.
 - checkout() — **Shopify storefront embed only.** Sends the customer to the host store's checkout (\`/checkout\`).
 - toggleSelect(element, value) — toggles a pill on/off for multi-select
@@ -332,7 +316,7 @@ Product card format (replace placeholders with real values from that product's c
 
 THREE_BACKTICKS_html
 <div class="card">
-<div class="card-media" onclick='openProduct("PASTE_PRODUCT_LINK_URL_HERE", "PRODUCT NAME")' title="View on Rooms To Go">
+<div class="card-media" onclick='openProduct("PASTE_PRODUCT_LINK_URL_HERE", "PRODUCT NAME")' title="View product details">
 <img class="card-image" src="PASTE_IMAGE_1_URL_HERE" alt="PRODUCT NAME" loading="lazy" />
 </div>
 <div class="card-title">PRODUCT NAME</div>
@@ -511,8 +495,9 @@ export function buildSystemPrompt(
     : HTML_INSTRUCTIONS;
 
   const locationBlock = buildCustomerLocationBlock(options?.customerLocation);
+  const tenantPromptConfigBlock = buildTenantPromptConfigBlock(options?.tenantPromptConfig);
   const tenantAiConfigBlock = buildTenantAiConfigBlock(options?.tenantAiConfig);
 
   // Combine: universal rules + current stage skill + context + accessory data + location + stage-appropriate output rules
-  return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}${tenantAiConfigBlock}\n\n---\n\n${outputRules}`;
+  return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}${tenantPromptConfigBlock}${tenantAiConfigBlock}\n\n---\n\n${outputRules}`;
 }

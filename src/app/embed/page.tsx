@@ -16,7 +16,7 @@ export default function EmbedPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.parent !== window) {
-      window.parent.postMessage({ type: "rtg-embed-ready" }, "*");
+      window.parent.postMessage({ type: "shop-assist-embed-ready" }, "*");
     }
   }, []);
 

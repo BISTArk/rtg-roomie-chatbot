@@ -1,7 +1,9 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
+# Florida Mattress Shopify app config.
+# Replace these values with the Florida Mattress Shopify app + Vercel deployment.
 client_id = "f12e324c15018b661cc39cd62124af01"
-application_url = "https://rtg-roomie-chatbot.vercel.app"
+application_url = "https://rtg-roomie-chatbot-x5el.vercel.app"
 embedded = true
 name = "Shop Assist"
 
@@ -13,7 +15,7 @@ scopes = "read_products"
 api_version = "2026-07"
 
 [auth]
-redirect_urls = [ "https://rtg-roomie-chatbot.vercel.app/api/shopify/callback" ]
+redirect_urls = [ "https://rtg-roomie-chatbot-x5el.vercel.app/api/shopify/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true

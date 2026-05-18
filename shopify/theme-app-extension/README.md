@@ -11,12 +11,12 @@ This folder contains a minimal Shopify Theme App Embed block scaffold for the ch
 
 ## File
 
-- `blocks/roomie-chatbot.liquid`
+- `blocks/shop-assist.liquid`
 
 ## How to use
 
 1. Create or open your Shopify app extension project.
-2. Copy `blocks/roomie-chatbot.liquid` into the extension's `blocks/` folder.
+2. Copy `blocks/shop-assist.liquid` into the extension's `blocks/` folder.
 3. Replace the default `app_base_url` value with your production Vercel URL if needed.
 4. Deploy the app extension through your Shopify app workflow.
 5. In the merchant's Theme Editor, enable the app embed and save.

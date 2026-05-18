@@ -10,7 +10,7 @@ import {
 import { syncTenantShopifyCatalog } from "@/lib/shopify-catalog-sync";
 import { upsertTenantFromShopifyInstall } from "@/lib/tenant-platform";
 
-const SHOPIFY_INSTALL_COOKIE = "rtg_shopify_install_state";
+const SHOPIFY_INSTALL_COOKIE = "shop_assist_shopify_install_state";
 
 export async function GET(request: NextRequest) {
   try {

@@ -1,19 +1,20 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
+# RTG Shopify app config.
 client_id = "36e8c79594a9d3507daa3b898610d503"
-name = "rtgtheme"
 application_url = "https://rtg-roomie-chatbot.vercel.app"
 embedded = true
+name = "Shop Assist"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products"
 
-[auth]
-redirect_urls = [ "https://rtg-roomie-chatbot.vercel.app/api/shopify/callback" ]
-
 [webhooks]
 api_version = "2026-07"
+
+[auth]
+redirect_urls = [ "https://rtg-roomie-chatbot.vercel.app/api/shopify/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true

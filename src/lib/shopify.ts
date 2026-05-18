@@ -79,23 +79,6 @@ interface ShopifyProductsPageResponse {
 function normalizeShopifyProductImageUrl(url: string | null | undefined): string {
   const raw = String(url || "").trim();
   if (!raw) return "";
-
-  try {
-    const parsed = new URL(raw);
-    const filename = parsed.pathname.split("/").pop() || "";
-    const basename = filename.replace(/\.[a-z0-9]+$/i, "");
-
-    if (
-      /_image-item$/i.test(basename) &&
-      parsed.hostname.toLowerCase().endsWith("shopify.com") &&
-      /\/files\//i.test(parsed.pathname)
-    ) {
-      return `https://assets.roomstogo.com/product/${basename}`;
-    }
-  } catch {
-    return raw;
-  }
-
   return raw;
 }
 

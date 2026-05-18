@@ -1,4 +1,4 @@
-const DEFAULT_NAMESPACE = "rtg-default";
+const DEFAULT_NAMESPACE = "shop-assist-demo";
 
 let storageNamespace = DEFAULT_NAMESPACE;
 
@@ -20,7 +20,7 @@ export function getScopedStorageKey(baseKey: string): string {
 }
 
 function uid(): string {
-  return `rtg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  return `shopassist_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 export function getBrowserSessionId(): string {

@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { PoolClient } from "pg";
-import { DEFAULT_WIDGET_BRANDING, DEFAULT_WIDGET_THEME, RTG_WIDGET_BRANDING, RTG_WIDGET_THEME } from "@/lib/widget-config";
+import { DEFAULT_WIDGET_BRANDING, DEFAULT_WIDGET_THEME, SHOP_ASSIST_WIDGET_BRANDING, SHOP_ASSIST_WIDGET_THEME } from "@/lib/widget-config";
 import { buildAccessoryCatalog, buildFullCatalogSnapshot } from "@/lib/tenant-catalog";
 import { ensurePlatformSchema, hasDatabase, withDb } from "@/lib/db";
 import { createTenantToken, normalizeHostname, normalizeOrigin, verifyTenantToken } from "@/lib/platform-security";
@@ -22,29 +22,29 @@ import type { PersistedChatMessage, SharedChatMessage } from "@/lib/chat-types";
 import type { VisitorProfile } from "@/lib/visitor-profile";
 import { formatRetrievedCatalog, queryFullCatalog } from "@/lib/catalog-retrieval";
 
-const DEFAULT_TENANT_KEY = "rtg-default";
+const DEFAULT_TENANT_KEY = "shop-assist-demo";
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const FALLBACK_TENANT: TenantRecord = {
-  tenantId: "tenant_local_rtg",
+  tenantId: "tenant_local_shop_assist",
   tenantKey: DEFAULT_TENANT_KEY,
-  name: "Rooms To Go Demo",
-  storageNamespace: "rtg-default",
-  appName: "Roomie Mattress Advisor",
-  appUrl: "https://www.roomstogo.com",
-  theme: RTG_WIDGET_THEME,
-  branding: RTG_WIDGET_BRANDING,
+  name: "Shop Assist Demo",
+  storageNamespace: "shop-assist-demo",
+  appName: "Shop Assist",
+  appUrl: "https://example.com",
+  theme: SHOP_ASSIST_WIDGET_THEME,
+  branding: SHOP_ASSIST_WIDGET_BRANDING,
   prompt: {
-    brandName: "Rooms To Go",
-    websiteUrl: "https://www.roomstogo.com",
-    supportUrl: "https://www.roomstogo.com/help",
-    storeLocatorUrl: "https://www.roomstogo.com/stores",
-    handoffDescription: "customer care",
+    brandName: "Demo Store",
+    websiteUrl: "https://example.com",
+    supportUrl: "https://example.com/support",
+    storeLocatorUrl: "https://example.com/stores",
+    handoffDescription: "support team",
   },
   aiConfig: {
-    businessSummary: "Rooms To Go selling sleep products and bedroom furniture online and in store.",
-    brandVoice: "Helpful, polished, reassuring, and consultative.",
-    targetAudience: "Shoppers comparing comfort, support, size, and value.",
+    businessSummary: "Demo Store uses Shop Assist to help shoppers compare products and move toward purchase with confidence.",
+    brandVoice: "Helpful, polished, and consultative.",
+    targetAudience: "Shoppers comparing comfort, support, size, value, and product fit.",
   },
   allowedDomains: ["localhost", "127.0.0.1"],
   shopifyInstallation: null,

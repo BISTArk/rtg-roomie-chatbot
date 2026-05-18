@@ -203,7 +203,7 @@ export default function AdminTenantCreateForm() {
           name="name"
           label="Tenant name"
           required
-          placeholder="Rooms To Go"
+          placeholder="Acme Sleep"
           helperText="The brand or client name shown in admin and used as the default brand label."
           values={values}
           errors={errors}
@@ -215,7 +215,7 @@ export default function AdminTenantCreateForm() {
           name="tenantKey"
           label="Tenant key"
           required
-          placeholder="rooms-to-go"
+          placeholder="acme-sleep"
           helperText="Use lowercase letters, numbers, dashes, or underscores. This becomes the tenant identifier."
           values={values}
           errors={errors}
@@ -226,7 +226,7 @@ export default function AdminTenantCreateForm() {
         <Field
           name="appName"
           label="App name"
-          placeholder="Roomie Mattress Advisor"
+          placeholder="Shop Assist"
           helperText="Display name for the experience. If left blank, it falls back to the tenant name."
           values={values}
           errors={errors}
@@ -274,7 +274,7 @@ export default function AdminTenantCreateForm() {
           <Field
             name="assistantName"
             label="Assistant name"
-            placeholder="Roomie"
+            placeholder="Shop Assist"
             helperText="Name shown as the assistant inside the widget."
             values={values}
             errors={errors}
@@ -285,7 +285,7 @@ export default function AdminTenantCreateForm() {
           <Field
             name="headerTitle"
             label="Header title"
-            placeholder="Chat with Roomie"
+            placeholder="Chat with Shop Assist"
             helperText="Main title displayed at the top of the chat window."
             values={values}
             errors={errors}
@@ -296,7 +296,7 @@ export default function AdminTenantCreateForm() {
           <Field
             name="launcherLabel"
             label="Launcher label"
-            placeholder="Ask Roomie"
+            placeholder="Ask Shop Assist"
             helperText="Button label used for the widget launcher."
             values={values}
             errors={errors}

@@ -16,7 +16,7 @@ export default async function ShopifyInstalledPage({
   const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
   const enableEmbedUrl =
     shopifyApiKey && shop && shop !== "your Shopify store"
-      ? `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${encodeURIComponent(shopifyApiKey)}/roomie-chatbot`
+      ? `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${encodeURIComponent(shopifyApiKey)}/shop-assist`
       : "";
 
   return (

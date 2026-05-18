@@ -2,7 +2,7 @@
  * Storefront Shopping Assistant embed script.
  *
  * Drop this single <script> tag on any Shopify (or other) page:
- *   <script src="https://rtg-roomie-chatbot.vercel.app/embed.js" defer></script>
+ *   <script src="https://your-app-host.example/embed.js" defer></script>
  *
  * It auto-detects the Shopify page context (product, collection, cart, search,
  * homepage), tracks browsing history, and manages chat persistence — all in the
@@ -28,12 +28,12 @@
     SUPPRESS_RETURNING: "suppress_returning",
   };
   var MAX_HISTORY = 30;
-  var MSG_CONTEXT = "rtg-page-context-update";
-  var SESSION_STATE_PREFIX = "rtg_session";
+  var MSG_CONTEXT = "shop-assist-page-context-update";
+  var SESSION_STATE_PREFIX = "shop_assist_session";
 
   // ─── Helpers ──────────────────────────────────────────────────────────
   function uid() {
-    return "rtg_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9);
+    return "shopassist_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9);
   }
 
   function safeGet(key) {
@@ -185,8 +185,8 @@
 
   var scriptConfig = readScriptConfig();
   var windowConfig =
-    window.RTG_CHAT_CONFIG && typeof window.RTG_CHAT_CONFIG === "object"
-      ? window.RTG_CHAT_CONFIG
+    window.SHOP_ASSIST_CONFIG && typeof window.SHOP_ASSIST_CONFIG === "object"
+      ? window.SHOP_ASSIST_CONFIG
       : null;
   var widgetConfig = mergeConfig(scriptConfig, windowConfig);
   var origin = resolveOrigin();
@@ -196,7 +196,7 @@
     window.location.hostname
   );
   var tenantKey = (widgetConfig.tenantKey || "").trim();
-  var storageNamespace = tenantKey || "rtg-unresolved";
+  var storageNamespace = tenantKey || "shop-assist-unresolved";
 
   function scopedStorageKey(base) {
     return storageNamespace + ":" + base;
@@ -586,7 +586,7 @@
 
       function sendInit(chatMessages, isSharedChat) {
         sendToIframe({
-          type: "rtg-init",
+          type: "shop-assist-init",
           sessionId: sessionId,
           chatMessages: chatMessages,
           pageContext: pageContext,
@@ -647,11 +647,11 @@
       if (!e.data || typeof e.data.type !== "string") return;
 
       switch (e.data.type) {
-        case "rtg-embed-ready":
+        case "shop-assist-embed-ready":
           handleReady();
           break;
 
-        case "rtg-navigate":
+        case "shop-assist-navigate":
           // Save pending product before navigating
           if (e.data.pendingProduct) {
             safeSet(scopedStorageKey(STORAGE.PENDING), JSON.stringify(e.data.pendingProduct));
@@ -661,42 +661,42 @@
           }
           break;
 
-        case "rtg-save-messages":
+        case "shop-assist-save-messages":
           if (e.data.messages) {
             safeSet(scopedStorageKey(STORAGE.CHAT), JSON.stringify(e.data.messages));
           }
           break;
 
-        case "rtg-save-profile":
+        case "shop-assist-save-profile":
           if (e.data.profile) {
             safeSet(scopedStorageKey(STORAGE.PROFILE), JSON.stringify(e.data.profile));
           }
           break;
 
-        case "rtg-clear-messages":
+        case "shop-assist-clear-messages":
           safeRemove(scopedStorageKey(STORAGE.CHAT));
           break;
 
-        case "rtg-set-suppress-returning":
+        case "shop-assist-set-suppress-returning":
           // Customer clicked in-chat refresh — suppress returning-style
           // greetings until they actually send a message.
           safeSet(scopedStorageKey(STORAGE.SUPPRESS_RETURNING), "1");
           break;
 
-        case "rtg-clear-suppress-returning":
+        case "shop-assist-clear-suppress-returning":
           // Customer just sent their first message after a refresh —
           // they're engaging again, so personalization can resume.
           safeRemove(scopedStorageKey(STORAGE.SUPPRESS_RETURNING));
           break;
 
-        case "rtg-widget-open":
+        case "shop-assist-widget-open":
           iframe.setAttribute("style", OPEN_STYLE);
           safeSet(scopedStorageKey(STORAGE.WIDGET_OPEN), "1");
           chatIsOpen = true;
           stopState3();
           break;
 
-        case "rtg-widget-close":
+        case "shop-assist-widget-close":
           iframe.setAttribute("style", CLOSED_STYLE);
           safeSet(scopedStorageKey(STORAGE.WIDGET_OPEN), "0");
           chatIsOpen = false;
@@ -710,7 +710,7 @@
           startState3();
           break;
 
-        case "rtg-add-to-cart": {
+        case "shop-assist-add-to-cart": {
           var rawId = e.data.variantId;
           var vid =
             typeof rawId === "number" && rawId === Math.floor(rawId)
@@ -725,7 +725,7 @@
           if (!vid || vid < 1 || !isFinite(vid)) {
             if (ready) {
               sendToIframe({
-                type: "rtg-cart-action-result",
+                type: "shop-assist-cart-action-result",
                 action: "add",
                 ok: false,
                 error: "Invalid variant id",
@@ -764,7 +764,7 @@
               }
               if (ready) {
                 sendToIframe({
-                  type: "rtg-cart-action-result",
+                  type: "shop-assist-cart-action-result",
                   action: "add",
                   ok: res.ok,
                   error: res.ok ? undefined : errMsg || "Add to cart failed",
@@ -815,7 +815,7 @@
             .catch(function () {
               if (ready) {
                 sendToIframe({
-                  type: "rtg-cart-action-result",
+                  type: "shop-assist-cart-action-result",
                   action: "add",
                   ok: false,
                   error: "Network error",
@@ -825,7 +825,7 @@
           break;
         }
 
-        case "rtg-checkout":
+        case "shop-assist-checkout":
           window.location.href = "/checkout";
           break;
       }
@@ -877,7 +877,7 @@
       var now = Date.now();
       if (now - lastActivitySent < 5000) return; // throttle to one pulse per 5s
       lastActivitySent = now;
-      if (ready) sendToIframe({ type: "rtg-activity", at: now });
+      if (ready) sendToIframe({ type: "shop-assist-activity", at: now });
     }
     ["mousemove", "scroll", "click", "keydown", "touchstart"].forEach(function (evt) {
       window.addEventListener(evt, onActivity, { passive: true });
@@ -956,7 +956,7 @@
       incState3Count();
       setLastInterjectionAt(now);
       sendToIframe({
-        type: "rtg-interjection",
+        type: "shop-assist-interjection",
         interjectionType: pickInterjectionType(),
       });
     }
@@ -974,7 +974,7 @@
     document.body.appendChild(iframe);
 
     // ── Public API (optional) ──
-    window.RTGChatEmbed = {
+    window.ShopAssistEmbed = {
       version: 2,
       origin: origin,
       setContext: function (ctx) {
@@ -990,7 +990,7 @@
     if (widgetConfig.tenantKey || !shopDomain || !origin) {
       tenantKey = (widgetConfig.tenantKey || "").trim();
       if (!tenantKey) {
-        console.error("RTG widget: missing tenantKey and no shop domain mapping was available.");
+        console.error("Shop Assist widget: missing tenantKey and no shop domain mapping was available.");
         return;
       }
       storageNamespace = tenantKey;
@@ -1004,11 +1004,11 @@
       }
       tenantKey = (widgetConfig.tenantKey || "").trim();
       if (!tenantKey && shopDomain) {
-        console.error("RTG widget: no tenant mapping found for shop domain", shopDomain);
+        console.error("Shop Assist widget: no tenant mapping found for shop domain", shopDomain);
         return;
       }
       if (!tenantKey) {
-        console.error("RTG widget: missing tenantKey and no shop domain mapping was available.");
+        console.error("Shop Assist widget: missing tenantKey and no shop domain mapping was available.");
         return;
       }
       storageNamespace = tenantKey;
