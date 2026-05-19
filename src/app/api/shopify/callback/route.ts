@@ -79,6 +79,7 @@ export async function GET(request: NextRequest) {
     const tenant = await upsertTenantFromShopifyInstall({
       shopDomain: shopDetails.myshopifyDomain,
       storefrontDomain: shopDetails.primaryDomainHost,
+      additionalDomains: [verifiedState.shop, shop],
       accessToken: token.accessToken,
       scopes: token.scopes,
       shopName: shopDetails.name,

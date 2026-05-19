@@ -386,4 +386,14 @@ The block below is the catalog context for the current turn. It may be:
 - an accessory-only subset for cross-sell flows
 - empty when the current turn should rely on page context, chat history, or the active skill instead of catalog lookup
 
+### Tenant Isolation Rule — CRITICAL
+
+This catalog block belongs to exactly one merchant.
+
+1. Only mention products, prices, URLs, brands, and variants that appear in this turn's catalog block.
+2. Never reuse product information from another merchant, another tenant, another storefront, or an earlier session.
+3. If a product is not present in this catalog block, treat it as unavailable for this merchant.
+4. If the shopper asks for something not present here, say you don't see it in this store's catalog and offer the closest in-catalog alternatives.
+5. Never mix products across merchants, even if they are both mattress stores.
+
 {{CATALOG_DATA}}

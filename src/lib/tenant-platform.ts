@@ -957,6 +957,7 @@ async function resolveTenantById(tenantId: string): Promise<TenantRecord | null>
 export async function upsertTenantFromShopifyInstall(input: {
   shopDomain: string;
   storefrontDomain?: string | null;
+  additionalDomains?: string[];
   accessToken: string;
   scopes: string[];
   shopName: string;
@@ -971,6 +972,11 @@ export async function upsertTenantFromShopifyInstall(input: {
   await ensurePlatformSchema();
   const normalizedShopDomain = input.shopDomain.trim().toLowerCase();
   const normalizedStorefrontDomain = input.storefrontDomain?.trim().toLowerCase() || null;
+  const normalizedAdditionalDomains = [...new Set(
+    (input.additionalDomains ?? [])
+      .map((domain) => String(domain || "").trim().toLowerCase())
+      .filter(Boolean)
+  )];
 
   await withDb(async (client) => {
     await client.query("BEGIN");
@@ -986,6 +992,7 @@ export async function upsertTenantFromShopifyInstall(input: {
         tenantId = await findPreferredTenantIdByDomains(client, [
           normalizedShopDomain,
           normalizedStorefrontDomain,
+          ...normalizedAdditionalDomains,
         ]);
       }
 
@@ -1060,7 +1067,11 @@ export async function upsertTenantFromShopifyInstall(input: {
         }
       }
 
-      for (const hostname of [normalizedShopDomain, normalizedStorefrontDomain].filter(Boolean) as string[]) {
+      for (const hostname of [
+        normalizedShopDomain,
+        normalizedStorefrontDomain,
+        ...normalizedAdditionalDomains,
+      ].filter(Boolean) as string[]) {
         await client.query(
           `INSERT INTO tenant_domains (id, tenant_id, hostname) VALUES ($1,$2,$3)
            ON CONFLICT (tenant_id, hostname) DO NOTHING`,
