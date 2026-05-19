@@ -228,6 +228,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     () => buildWidgetThemeStyle(widgetConfig.theme),
     [widgetConfig.theme]
   );
+  const isLeftPlacement = widgetConfig.placement === "bottom-left";
+  const launcherPositionClass = isLeftPlacement
+    ? "left-2 sm:left-4"
+    : "right-4 sm:right-6";
+  const panelPositionClass = isLeftPlacement
+    ? "left-0 right-auto sm:left-4 sm:right-auto"
+    : "right-0 left-auto sm:right-6 sm:left-auto";
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastAssistantRef = useRef<HTMLDivElement>(null);
@@ -1428,7 +1435,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       {!isOpen && (
         <button
           onClick={handleOpen}
-          className={`fixed bottom-4 right-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 sm:right-6 ${embed ? "pointer-events-auto" : ""}`}
+          className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
           style={{
             backgroundColor: "var(--widget-surface)",
             color: "var(--widget-text)",
@@ -1462,7 +1469,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           />
 
           <div
-            className={`widget-enter fixed inset-x-0 bottom-0 z-50 flex h-[80dvh] max-h-[80dvh] flex-col overflow-hidden rounded-t-[28px] shadow-2xl sm:inset-x-auto sm:bottom-6 sm:right-6 sm:h-[640px] sm:max-h-[640px] sm:w-[420px] sm:rounded-2xl ${embed ? "pointer-events-auto" : ""}`}
+            className={`widget-enter fixed bottom-0 z-50 flex h-[80dvh] max-h-[80dvh] w-[min(420px,100vw)] max-w-[100vw] flex-col overflow-hidden rounded-t-[28px] shadow-2xl sm:bottom-6 sm:h-[640px] sm:max-h-[640px] sm:w-[420px] sm:rounded-2xl ${panelPositionClass} ${embed ? "pointer-events-auto" : ""}`}
             style={{
               border: "1px solid var(--widget-border)",
               backgroundColor: "var(--widget-surface)",

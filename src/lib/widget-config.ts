@@ -43,6 +43,7 @@ export interface ShopAssistChatConfig {
 }
 
 export interface ResolvedWidgetConfig {
+  placement: WidgetPlacement;
   theme: WidgetTheme;
   branding: WidgetBranding;
 }
@@ -190,12 +191,17 @@ function sanitizeBranding(branding: unknown): Partial<WidgetBranding> {
   };
 }
 
+function sanitizePlacement(value: unknown): WidgetPlacement {
+  return value === "bottom-left" ? "bottom-left" : "bottom-right";
+}
+
 export function resolveWidgetConfig(config?: unknown): ResolvedWidgetConfig {
   const record = asRecord(config);
   const theme = sanitizeTheme(record?.theme);
   const branding = sanitizeBranding(record?.branding);
 
   return {
+    placement: sanitizePlacement(record?.placement),
     theme: {
       ...DEFAULT_WIDGET_THEME,
       ...theme,
@@ -215,6 +221,7 @@ export function mergeWidgetConfigLayers(
       if (!config) return resolved;
       const next = resolveWidgetConfig(config);
       return {
+        placement: next.placement,
         theme: {
           ...resolved.theme,
           ...next.theme,
@@ -226,6 +233,7 @@ export function mergeWidgetConfigLayers(
       };
     },
     {
+      placement: "bottom-right",
       theme: { ...DEFAULT_WIDGET_THEME },
       branding: { ...DEFAULT_WIDGET_BRANDING },
     }
