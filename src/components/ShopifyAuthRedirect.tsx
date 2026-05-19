@@ -11,15 +11,30 @@ export function ShopifyAuthRedirect({
 }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    const navigateTop = () => {
+      try {
+        window.open(installUrl, "_top");
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     try {
       if (window.top && window.top !== window) {
-        window.top.location.href = installUrl;
+        if (!navigateTop()) {
+          window.top.location.assign(installUrl);
+        }
         return;
       }
     } catch {
       // Fall through to same-window navigation.
     }
-    window.location.href = installUrl;
+
+    if (!navigateTop()) {
+      window.location.assign(installUrl);
+    }
   }, [installUrl]);
 
   return (
@@ -37,6 +52,8 @@ export function ShopifyAuthRedirect({
         <div className="mt-6">
           <a
             href={installUrl}
+            target="_top"
+            rel="noreferrer"
             className="rounded-2xl px-4 py-3 text-sm font-semibold"
             style={{ background: "var(--widget-accent)", color: "var(--widget-accent-text)" }}
           >

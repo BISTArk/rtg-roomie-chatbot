@@ -360,6 +360,40 @@ async function loadTenantDomains(client: PoolClient, tenantId: string): Promise<
   return result.rows.map((row) => row.hostname);
 }
 
+async function findPreferredTenantIdByDomains(
+  client: PoolClient,
+  hostnames: Array<string | null | undefined>
+): Promise<string> {
+  const normalizedHostnames = [...new Set(
+    hostnames
+      .map((hostname) => String(hostname || "").trim().toLowerCase())
+      .filter(Boolean)
+  )];
+
+  if (normalizedHostnames.length === 0) {
+    return "";
+  }
+
+  const result = await client.query<{ tenant_id: string }>(
+    `SELECT d.tenant_id
+     FROM tenant_domains d
+     INNER JOIN tenants t ON t.id = d.tenant_id
+     LEFT JOIN shopify_installations si ON si.tenant_id = t.id
+     LEFT JOIN catalog_versions cv ON cv.tenant_id = t.id AND cv.is_active = TRUE
+     WHERE d.hostname = ANY($1::text[])
+     GROUP BY d.tenant_id
+     ORDER BY
+       COALESCE(BOOL_OR(si.status = 'installed'), FALSE) DESC,
+       COALESCE(BOOL_OR(cv.is_active = TRUE), FALSE) DESC,
+       MAX(t.updated_at) DESC,
+       d.tenant_id ASC
+     LIMIT 1`,
+    [normalizedHostnames]
+  );
+
+  return result.rows[0]?.tenant_id || "";
+}
+
 function hostAllowed(hostname: string, allowedDomains: string[]): boolean {
   if (!hostname) return false;
   const normalizedHostname = hostname.toLowerCase();
@@ -437,13 +471,12 @@ export async function resolveTenantByDomain(
 
   await seedDefaultTenant();
   return withDb(async (client) => {
+    const tenantId = await findPreferredTenantIdByDomains(client, [normalizedHostname]);
+    if (!tenantId) return null;
+
     const result = await client.query<TenantRow>(
-      `SELECT t.*
-       FROM tenants t
-       INNER JOIN tenant_domains d ON d.tenant_id = t.id
-       WHERE LOWER(d.hostname) = $1
-       LIMIT 1`,
-      [normalizedHostname]
+      `SELECT * FROM tenants WHERE id = $1 LIMIT 1`,
+      [tenantId]
     );
 
     const row = result.rows[0];
@@ -950,6 +983,13 @@ export async function upsertTenantFromShopifyInstall(input: {
       let tenantId = existingInstallationResult.rows[0]?.tenant_id;
 
       if (!tenantId) {
+        tenantId = await findPreferredTenantIdByDomains(client, [
+          normalizedShopDomain,
+          normalizedStorefrontDomain,
+        ]);
+      }
+
+      if (!tenantId) {
         tenantId = randomUUID();
         const tenantKey = await ensureUniqueTenantKey(
           client,
@@ -981,6 +1021,43 @@ export async function upsertTenantFromShopifyInstall(input: {
             JSON.stringify(defaultTenantAiConfig(tenantName)),
           ]
         );
+      } else {
+        const currentTenantResult = await client.query<TenantRow>(
+          `SELECT * FROM tenants WHERE id = $1 LIMIT 1`,
+          [tenantId]
+        );
+        const currentTenant = currentTenantResult.rows[0];
+        if (currentTenant) {
+          const tenantName = input.shopName.trim() || currentTenant.name;
+          const appUrl = normalizedStorefrontDomain
+            ? `https://${normalizedStorefrontDomain}`
+            : `https://${normalizedShopDomain}`;
+          await client.query(
+            `UPDATE tenants
+             SET name = $2,
+                 app_name = $3,
+                 app_url = $4,
+                 prompt_json = $5::jsonb,
+                 ai_config_json = $6::jsonb,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [
+              tenantId,
+              tenantName,
+              `${tenantName} Assistant`,
+              appUrl,
+              JSON.stringify({
+                ...(currentTenant.prompt_json ?? {}),
+                brandName: tenantName,
+                websiteUrl: appUrl,
+              }),
+              JSON.stringify({
+                ...defaultTenantAiConfig(tenantName),
+                ...(currentTenant.ai_config_json ?? {}),
+              }),
+            ]
+          );
+        }
       }
 
       for (const hostname of [normalizedShopDomain, normalizedStorefrontDomain].filter(Boolean) as string[]) {
@@ -1072,11 +1149,10 @@ export async function ensureTenantForShopifyStorefront(input: {
       tenantId = installationResult.rows[0]?.tenant_id || "";
 
       if (!tenantId) {
-        const domainMatch = await client.query<{ tenant_id: string }>(
-          `SELECT tenant_id FROM tenant_domains WHERE hostname = ANY($1::text[]) LIMIT 1`,
-          [[normalizedShopDomain, normalizedStorefrontDomain].filter(Boolean)]
-        );
-        tenantId = domainMatch.rows[0]?.tenant_id || "";
+        tenantId = await findPreferredTenantIdByDomains(client, [
+          normalizedShopDomain,
+          normalizedStorefrontDomain,
+        ]);
       }
 
       if (!tenantId) {
