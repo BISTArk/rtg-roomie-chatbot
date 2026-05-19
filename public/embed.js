@@ -172,6 +172,23 @@
     }
   }
 
+  function sanitizeNamespacePart(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function buildStorageNamespace(tenantKey, hostname) {
+    var normalizedTenantKey = sanitizeNamespacePart(tenantKey);
+    var normalizedHostname = sanitizeNamespacePart(normalizeShopDomain(hostname));
+    if (normalizedTenantKey && normalizedHostname) {
+      return normalizedTenantKey + ":" + normalizedHostname;
+    }
+    return normalizedTenantKey || "shop-assist-unresolved";
+  }
+
   function resolveOrigin() {
     var script = getEmbedScript();
     if (script && script.src) {
@@ -211,7 +228,7 @@
   );
   var tenantKey = (widgetConfig.tenantKey || "").trim();
   var placement = normalizePlacement(widgetConfig.placement);
-  var storageNamespace = tenantKey || "shop-assist-unresolved";
+  var storageNamespace = buildStorageNamespace(tenantKey, window.location.hostname);
 
   function scopedStorageKey(base) {
     return storageNamespace + ":" + base;
@@ -1008,7 +1025,7 @@
         console.error("Shop Assist widget: missing tenantKey and no shop domain mapping was available.");
         return;
       }
-      storageNamespace = tenantKey;
+      storageNamespace = buildStorageNamespace(tenantKey, window.location.hostname);
       inject();
       return;
     }
@@ -1026,7 +1043,7 @@
         console.error("Shop Assist widget: missing tenantKey and no shop domain mapping was available.");
         return;
       }
-      storageNamespace = tenantKey;
+      storageNamespace = buildStorageNamespace(tenantKey, window.location.hostname);
       inject();
     });
   }
