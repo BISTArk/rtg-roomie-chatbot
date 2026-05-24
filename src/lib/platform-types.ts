@@ -11,6 +11,12 @@ export interface TenantAiConfig {
   salesPolicy?: string;
   supportPolicy?: string;
   extraInstructions?: string;
+  discoveryGuidance?: string;
+  recommendationGuidance?: string;
+  comparisonGuidance?: string;
+  closingGuidance?: string;
+  proactiveGuidance?: string;
+  complaintGuidance?: string;
 }
 
 export type ShopifyInstallStatus = "pending" | "installed" | "uninstalled";

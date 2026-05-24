@@ -38,6 +38,18 @@ export async function POST(
           String(formData.get("supportPolicy") || "").trim() || undefined,
         extraInstructions:
           String(formData.get("extraInstructions") || "").trim() || undefined,
+        discoveryGuidance:
+          String(formData.get("discoveryGuidance") || "").trim() || undefined,
+        recommendationGuidance:
+          String(formData.get("recommendationGuidance") || "").trim() || undefined,
+        comparisonGuidance:
+          String(formData.get("comparisonGuidance") || "").trim() || undefined,
+        closingGuidance:
+          String(formData.get("closingGuidance") || "").trim() || undefined,
+        proactiveGuidance:
+          String(formData.get("proactiveGuidance") || "").trim() || undefined,
+        complaintGuidance:
+          String(formData.get("complaintGuidance") || "").trim() || undefined,
       },
       branding: {
         assistantName:

@@ -9,8 +9,10 @@
     "info": "shopify app info",
     "generate": "shopify app generate",
     "deploy": "shopify app deploy",
+    "sync:embed:main": "node ./scripts/sync-theme-embed-url.mjs shopify.app.toml",
     "sync:embed:rtg": "node ./scripts/sync-theme-embed-url.mjs shopify.app.rtg.toml",
     "sync:embed:florida-mattress": "node ./scripts/sync-theme-embed-url.mjs shopify.app.florida-mattress.toml",
+    "deploy:main": "npm run sync:embed:main && shopify app deploy --config shopify.app.toml",
     "deploy:rtg": "npm run sync:embed:rtg && shopify app deploy --config shopify.app.rtg.toml",
     "deploy:florida-mattress": "npm run sync:embed:florida-mattress && shopify app deploy --config shopify.app.florida-mattress.toml"
   },

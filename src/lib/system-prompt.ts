@@ -105,10 +105,13 @@ function buildTenantPromptConfigBlock(config?: TenantPromptConfig): string {
   return `\n\n---\n\n# MERCHANT PROMPT CONFIG\n\nUse the merchant-specific details below whenever you reference the merchant, link to support, mention store visits, or describe human handoff options:\n${lines.join("\n")}`;
 }
 
-function buildTenantAiConfigBlock(config?: TenantAiConfig): string {
+function buildTenantAiConfigBlock(
+  config: TenantAiConfig | undefined,
+  stage: ConversationStage
+): string {
   if (!config) return "";
 
-  const lines = [
+  const globalLines = [
     config.businessSummary ? `- Business summary: ${config.businessSummary}` : null,
     config.brandVoice ? `- Brand voice: ${config.brandVoice}` : null,
     config.targetAudience ? `- Target audience: ${config.targetAudience}` : null,
@@ -117,8 +120,36 @@ function buildTenantAiConfigBlock(config?: TenantAiConfig): string {
     config.extraInstructions ? `- Extra merchant instructions: ${config.extraInstructions}` : null,
   ].filter(Boolean) as string[];
 
-  if (lines.length === 0) return "";
-  return `\n\n---\n\n# TENANT AI CONFIG\n\nUse the merchant-specific guidance below to adapt your tone, recommendations, and boundaries for this store:\n${lines.join("\n")}`;
+  const stageGuidance =
+    stage === "discovery"
+      ? config.discoveryGuidance
+      : stage === "recommendation"
+        ? config.recommendationGuidance
+        : stage === "comparison"
+          ? config.comparisonGuidance
+          : stage === "closing" || stage === "upsell"
+            ? config.closingGuidance
+            : stage === "complaint"
+              ? config.complaintGuidance
+              : config.proactiveGuidance;
+
+  const sections: string[] = [];
+  if (globalLines.length > 0) {
+    sections.push(
+      "Use the merchant-specific guidance below to adapt your tone, recommendations, and boundaries for this store:",
+      globalLines.join("\n")
+    );
+  }
+
+  if (stageGuidance?.trim()) {
+    sections.push(
+      `Stage-specific guidance for ${stage}:`,
+      `- ${stageGuidance.trim()}`
+    );
+  }
+
+  if (sections.length === 0) return "";
+  return `\n\n---\n\n# TENANT AI CONFIG\n\n${sections.join("\n\n")}`;
 }
 
 /**
@@ -496,7 +527,7 @@ export function buildSystemPrompt(
 
   const locationBlock = buildCustomerLocationBlock(options?.customerLocation);
   const tenantPromptConfigBlock = buildTenantPromptConfigBlock(options?.tenantPromptConfig);
-  const tenantAiConfigBlock = buildTenantAiConfigBlock(options?.tenantAiConfig);
+  const tenantAiConfigBlock = buildTenantAiConfigBlock(options?.tenantAiConfig, stage);
 
   // Combine: universal rules + current stage skill + context + accessory data + location + stage-appropriate output rules
   return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}${tenantPromptConfigBlock}${tenantAiConfigBlock}\n\n---\n\n${outputRules}`;

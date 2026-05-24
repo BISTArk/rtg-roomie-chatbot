@@ -83,6 +83,33 @@ function normalizeShopifyProductImageUrl(url: string | null | undefined): string
   return raw;
 }
 
+function normalizeShopifyProductUrl(input: {
+  onlineStoreUrl?: string | null;
+  storefrontDomain?: string | null;
+  shop: string;
+  handle: string;
+}): string {
+  const storefrontDomain = String(input.storefrontDomain || "").trim().toLowerCase();
+  const fallbackHost = storefrontDomain || input.shop;
+  const fallbackUrl = `https://${fallbackHost}/products/${input.handle}`;
+  const raw = String(input.onlineStoreUrl || "").trim();
+
+  if (!raw) {
+    return fallbackUrl;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (storefrontDomain) {
+      parsed.hostname = storefrontDomain;
+      parsed.protocol = "https:";
+    }
+    return parsed.toString();
+  } catch {
+    return fallbackUrl;
+  }
+}
+
 function formatShopifyAdminIdAsVariantId(adminGraphQlId: string): string {
   const match = adminGraphQlId.match(/\/(\d+)$/);
   return match?.[1] || "";
@@ -224,8 +251,16 @@ export async function buildCatalogDatasetFromShopify(input: {
 
     for (const edge of pageResponse.products.edges) {
       const product = edge.node;
-      const baseUrl = input.storefrontDomain ? `https://${input.storefrontDomain}` : `https://${input.shop}`;
-      const productUrl = product.onlineStoreUrl || `${baseUrl}/products/${product.handle}`;
+      if (String(product.status || "").trim().toUpperCase() !== "ACTIVE") {
+        continue;
+      }
+
+      const productUrl = normalizeShopifyProductUrl({
+        onlineStoreUrl: product.onlineStoreUrl,
+        storefrontDomain: input.storefrontDomain,
+        shop: input.shop,
+        handle: product.handle,
+      });
 
       for (const variantEdge of product.variants.edges) {
         const variant = variantEdge.node;

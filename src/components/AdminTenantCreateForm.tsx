@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   EMPTY_TENANT_CREATE_FORM_VALUES,
   type TenantCreateFormErrors,
@@ -76,11 +79,7 @@ function Field({
           {required ? "Required" : "Optional"}
         </span>
       </span>
-      {multiline ? (
-        <textarea {...commonProps} rows={3} />
-      ) : (
-        <input {...commonProps} type={type} />
-      )}
+      {multiline ? <Textarea {...commonProps} rows={3} /> : <Input {...commonProps} type={type} />}
       <span id={`${inputId}-hint`} className="block text-xs" style={{ color: "var(--widget-text-muted)" }}>
         {helperText}
       </span>
@@ -187,7 +186,7 @@ export default function AdminTenantCreateForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="mt-4 space-y-6">
+    <form onSubmit={handleSubmit} noValidate className="space-y-6">
       <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface-alt)", color: "var(--widget-text-muted)" }}>
         Fields marked <strong>Required</strong> must be filled in. Everything else is optional and can be added later.
       </div>
@@ -369,14 +368,14 @@ export default function AdminTenantCreateForm() {
         </div>
       </div>
 
-      <button
+      <Button
         type="submit"
         disabled={isSubmitting}
-        className="rounded-2xl px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-70"
-        style={{ background: "var(--widget-accent)", color: "var(--widget-accent-text)" }}
+        size="lg"
+        className="w-full sm:w-auto"
       >
         {isSubmitting ? "Creating tenant..." : "Create tenant"}
-      </button>
+      </Button>
     </form>
   );
 }
