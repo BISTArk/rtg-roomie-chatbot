@@ -1015,7 +1015,7 @@ export async function listTenantSessionAnalyticsPage(
            MAX(created_at) AS last_request_at
          FROM conversation_analytics
          GROUP BY tenant_id, session_id
-       )
+       ),
        session_rows AS (
        SELECT
          t.id AS tenant_id,
