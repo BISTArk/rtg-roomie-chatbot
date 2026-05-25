@@ -1,5 +1,8 @@
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import type {
+  TenantSessionAnalyticsPage,
   TenantAnalyticsSummary,
   TenantSessionAnalyticsRecord,
 } from "@/lib/platform-types";
@@ -29,12 +32,32 @@ function TotalsCard({ label, value, helper }: { label: string; value: string; he
   );
 }
 
+function tabClass(active: boolean): string {
+  return active
+    ? "rounded-full border px-4 py-2 text-sm font-medium text-[var(--widget-text)] bg-[var(--widget-surface)] shadow-sm"
+    : "rounded-full border px-4 py-2 text-sm font-medium text-[var(--widget-text-muted)] bg-transparent";
+}
+
 export default function AdminAnalyticsDashboard({
+  activeTab,
   summaries,
-  recentSessions,
+  sessionPage,
+  tenantOptions,
+  filters,
 }: {
+  activeTab: "overview" | "sessions";
   summaries: TenantAnalyticsSummary[];
-  recentSessions: TenantSessionAnalyticsRecord[];
+  sessionPage: TenantSessionAnalyticsPage;
+  tenantOptions: Array<{ tenantId: string; tenantKey: string; tenantName: string }>;
+  filters: {
+    tenantIds: string[];
+    fromDate: string;
+    toDate: string;
+    query: string;
+    errorsOnly: boolean;
+    limit: number;
+    page: number;
+  };
 }) {
   const totals = summaries.reduce(
     (acc, summary) => ({
@@ -56,16 +79,152 @@ export default function AdminAnalyticsDashboard({
       errors: 0,
     }
   );
+  const recentSessions = sessionPage.records;
+  const startRow = sessionPage.totalCount === 0 ? 0 : sessionPage.offset + 1;
+  const endRow = sessionPage.offset + recentSessions.length;
+  const totalPages = Math.max(1, Math.ceil(Math.max(0, sessionPage.totalCount) / Math.max(1, sessionPage.limit)));
+
+  const buildHref = (overrides: Record<string, string | number | boolean | string[] | null | undefined>) => {
+    const params = new URLSearchParams();
+    const merged = {
+      tab: activeTab,
+      tenant: filters.tenantIds,
+      from: filters.fromDate,
+      to: filters.toDate,
+      q: filters.query,
+      errors: filters.errorsOnly ? "1" : "",
+      limit: String(filters.limit),
+      page: String(filters.page),
+      ...overrides,
+    };
+
+    Object.entries(merged).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.filter(Boolean).forEach((item) => params.append(key, item));
+        return;
+      }
+      if (value === null || value === undefined) return;
+      if (typeof value === "boolean") {
+        if (value) params.set(key, "1");
+        return;
+      }
+      const text = String(value).trim();
+      if (!text) return;
+      params.set(key, text);
+    });
+
+    const queryString = params.toString();
+    return queryString ? `/admin/analytics?${queryString}` : "/admin/analytics";
+  };
+
+  const outlineLinkClass =
+    "inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition-colors";
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Analytics</CardTitle>
         <CardDescription>
-          Database-backed usage across tenants, including sessions, request volume, and token usage captured from the chat route.
+          Database-backed usage across tenants, with overview totals plus a server-filtered session table.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="flex flex-wrap gap-2">
+          <Link href={buildHref({ tab: "overview", page: 1 })} className={tabClass(activeTab === "overview")} style={{ borderColor: "var(--widget-border)" }}>
+            Overview
+          </Link>
+          <Link href={buildHref({ tab: "sessions", page: 1 })} className={tabClass(activeTab === "sessions")} style={{ borderColor: "var(--widget-border)" }}>
+            Sessions
+          </Link>
+        </div>
+
+        <form action="/admin/analytics" method="get" className="space-y-4 rounded-2xl border p-4" style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface-alt)" }}>
+          <input type="hidden" name="tab" value={activeTab} />
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-6">
+            <label className="space-y-2 xl:col-span-2">
+              <span className="text-sm font-medium text-[var(--widget-text)]">Tenants</span>
+              <select
+                name="tenant"
+                multiple
+                defaultValue={filters.tenantIds}
+                className="min-h-36 w-full rounded-2xl border px-3 py-2 text-sm text-[var(--widget-text)]"
+                style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)" }}
+              >
+                {tenantOptions.map((tenant) => (
+                  <option key={tenant.tenantId} value={tenant.tenantId}>
+                    {tenant.tenantName} ({tenant.tenantKey})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--widget-text)]">From</span>
+              <input
+                type="date"
+                name="from"
+                defaultValue={filters.fromDate}
+                className="w-full rounded-2xl border px-3 py-2 text-sm text-[var(--widget-text)]"
+                style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)" }}
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--widget-text)]">To</span>
+              <input
+                type="date"
+                name="to"
+                defaultValue={filters.toDate}
+                className="w-full rounded-2xl border px-3 py-2 text-sm text-[var(--widget-text)]"
+                style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)" }}
+              />
+            </label>
+
+            <label className="space-y-2 xl:col-span-2">
+              <span className="text-sm font-medium text-[var(--widget-text)]">Session / Host Search</span>
+              <input
+                type="text"
+                name="q"
+                defaultValue={filters.query}
+                placeholder="Session ID, host, tenant name..."
+                className="w-full rounded-2xl border px-3 py-2 text-sm text-[var(--widget-text)]"
+                style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)" }}
+              />
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm text-[var(--widget-text)]">
+              <input type="checkbox" name="errors" value="1" defaultChecked={filters.errorsOnly} />
+              Errors only
+            </label>
+
+            <label className="inline-flex items-center gap-2 text-sm text-[var(--widget-text)]">
+              <span>Rows</span>
+              <select
+                name="limit"
+                defaultValue={String(filters.limit)}
+                className="rounded-2xl border px-3 py-2 text-sm text-[var(--widget-text)]"
+                style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)" }}
+              >
+                {[25, 50, 100].map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+
+            <input type="hidden" name="page" value="1" />
+            <Button type="submit">Apply filters</Button>
+            <Link
+              href={`/admin/analytics?tab=${activeTab}`}
+              className={outlineLinkClass}
+              style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+            >
+              Clear
+            </Link>
+          </div>
+        </form>
+
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <TotalsCard label="Tenants" value={formatCount(totals.tenants)} helper="Tracked merchant tenants" />
           <TotalsCard label="Sessions" value={formatCount(totals.sessions)} helper="Distinct chat sessions saved" />
@@ -74,6 +233,7 @@ export default function AdminAnalyticsDashboard({
           <TotalsCard label="Errors" value={formatCount(totals.errors)} helper="Blocked or failed analytics events" />
         </div>
 
+        {activeTab === "overview" ? (
         <div className="overflow-hidden rounded-2xl border" style={{ borderColor: "var(--widget-border)" }}>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y" style={{ borderColor: "var(--widget-border)" }}>
@@ -125,11 +285,15 @@ export default function AdminAnalyticsDashboard({
             </table>
           </div>
         </div>
+        ) : null}
 
+        {activeTab === "sessions" ? (
         <div className="overflow-hidden rounded-2xl border" style={{ borderColor: "var(--widget-border)" }}>
           <div className="border-b px-4 py-3" style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface-alt)" }}>
             <div className="text-sm font-semibold text-[var(--widget-text)]">Recent Sessions</div>
-            <div className="mt-1 text-xs text-[var(--widget-text-muted)]">Most recently active sessions across all tenants, including token totals and request counts.</div>
+            <div className="mt-1 text-xs text-[var(--widget-text-muted)]">
+              Showing {formatCount(startRow)}-{formatCount(endRow)} of {formatCount(sessionPage.totalCount)} server-filtered sessions.
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y" style={{ borderColor: "var(--widget-border)" }}>
@@ -181,7 +345,47 @@ export default function AdminAnalyticsDashboard({
               </tbody>
             </table>
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3" style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface-alt)" }}>
+            <div className="text-xs text-[var(--widget-text-muted)]">
+              Page {formatCount(filters.page)} of {formatCount(totalPages)}
+            </div>
+            <div className="flex gap-2">
+              {filters.page <= 1 ? (
+                <span
+                  className={`${outlineLinkClass} cursor-not-allowed opacity-50`}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Previous
+                </span>
+              ) : (
+                <Link
+                  href={buildHref({ page: Math.max(1, filters.page - 1), tab: "sessions" })}
+                  className={outlineLinkClass}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Previous
+                </Link>
+              )}
+              {filters.page >= totalPages || sessionPage.totalCount === 0 ? (
+                <span
+                  className={`${outlineLinkClass} cursor-not-allowed opacity-50`}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Next
+                </span>
+              ) : (
+                <Link
+                  href={buildHref({ page: Math.min(totalPages, filters.page + 1), tab: "sessions" })}
+                  className={outlineLinkClass}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Next
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
+        ) : null}
       </CardContent>
     </Card>
   );

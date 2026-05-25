@@ -124,6 +124,13 @@ export interface TenantAnalyticsSummary {
   lastActiveAt?: string | null;
 }
 
+export interface TenantAnalyticsFilters {
+  tenantIds?: string[];
+  excludedTenantIds?: string[];
+  fromDate?: string | null;
+  toDate?: string | null;
+}
+
 export interface TenantSessionAnalyticsRecord {
   tenantId: string;
   tenantKey: string;
@@ -141,4 +148,18 @@ export interface TenantSessionAnalyticsRecord {
   completionTokens: number;
   totalTokens: number;
   errorCount: number;
+}
+
+export interface TenantSessionAnalyticsFilters extends TenantAnalyticsFilters {
+  query?: string | null;
+  errorsOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TenantSessionAnalyticsPage {
+  records: TenantSessionAnalyticsRecord[];
+  totalCount: number;
+  limit: number;
+  offset: number;
 }

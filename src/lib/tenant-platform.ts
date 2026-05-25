@@ -13,11 +13,14 @@ import type {
   ShopifyInstallationRecord,
   ShopifyInstallStatus,
   TenantAiConfig,
+  TenantAnalyticsFilters,
   TenantAnalyticsSummary,
   TenantBootstrap,
   TenantPromptConfig,
   TenantRecord,
   TenantRuntimeConfig,
+  TenantSessionAnalyticsFilters,
+  TenantSessionAnalyticsPage,
   TenantSessionAnalyticsRecord,
 } from "@/lib/platform-types";
 import type { PersistedChatMessage, SharedChatMessage } from "@/lib/chat-types";
@@ -119,6 +122,7 @@ interface ConversationAnalyticsSessionRow {
   completion_tokens: string | number;
   total_tokens: string | number;
   error_count: string | number;
+  total_count?: string | number;
 }
 
 function asCount(value: string | number | null | undefined): number {
@@ -166,6 +170,58 @@ function mapTenantSessionAnalytics(row: ConversationAnalyticsSessionRow): Tenant
     totalTokens: asCount(row.total_tokens),
     errorCount: asCount(row.error_count),
   };
+}
+
+function normalizeTextArray(values: string[] | null | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function normalizeDateStart(value: string | null | undefined): string | null {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const normalized = new Date(`${text}T00:00:00.000Z`);
+  return Number.isNaN(normalized.getTime()) ? null : normalized.toISOString();
+}
+
+function normalizeDateEndExclusive(value: string | null | undefined): string | null {
+  const start = normalizeDateStart(value);
+  if (!start) return null;
+  const date = new Date(start);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString();
+}
+
+function appendTenantAndDateFilters(input: {
+  filters?: TenantAnalyticsFilters;
+  tenantColumn: string;
+  timestampColumn: string;
+  conditions: string[];
+  params: unknown[];
+}): void {
+  const tenantIds = normalizeTextArray(input.filters?.tenantIds);
+  const excludedTenantIds = normalizeTextArray(input.filters?.excludedTenantIds);
+  const fromDate = normalizeDateStart(input.filters?.fromDate);
+  const toDateExclusive = normalizeDateEndExclusive(input.filters?.toDate);
+
+  if (tenantIds.length > 0) {
+    input.params.push(tenantIds);
+    input.conditions.push(`${input.tenantColumn} = ANY($${input.params.length}::text[])`);
+  }
+
+  if (excludedTenantIds.length > 0) {
+    input.params.push(excludedTenantIds);
+    input.conditions.push(`NOT (${input.tenantColumn} = ANY($${input.params.length}::text[]))`);
+  }
+
+  if (fromDate) {
+    input.params.push(fromDate);
+    input.conditions.push(`${input.timestampColumn} >= $${input.params.length}::timestamptz`);
+  }
+
+  if (toDateExclusive) {
+    input.params.push(toDateExclusive);
+    input.conditions.push(`${input.timestampColumn} < $${input.params.length}::timestamptz`);
+  }
 }
 
 function defaultTenantAiConfig(name: string): TenantAiConfig {
@@ -796,10 +852,32 @@ export async function recordConversationAnalytics(input: {
   });
 }
 
-export async function listTenantAnalyticsSummaries(): Promise<TenantAnalyticsSummary[]> {
+export async function listTenantAnalyticsSummaries(
+  filters: TenantAnalyticsFilters = {}
+): Promise<TenantAnalyticsSummary[]> {
   if (!hasDatabase()) return [];
   await ensurePlatformSchema();
   return withDb(async (client) => {
+    const params: unknown[] = [];
+    const messageConditions = ["1=1"];
+    const analyticsConditions = ["1=1"];
+
+    appendTenantAndDateFilters({
+      filters,
+      tenantColumn: "c.tenant_id",
+      timestampColumn: "c.updated_at",
+      conditions: messageConditions,
+      params,
+    });
+
+    appendTenantAndDateFilters({
+      filters,
+      tenantColumn: "ca.tenant_id",
+      timestampColumn: "ca.created_at",
+      conditions: analyticsConditions,
+      params,
+    });
+
     const result = await client.query<ConversationAnalyticsSummaryRow>(
       `WITH message_stats AS (
          SELECT
@@ -811,6 +889,7 @@ export async function listTenantAnalyticsSummaries(): Promise<TenantAnalyticsSum
            MAX(c.updated_at) AS last_conversation_at
          FROM conversations c
          LEFT JOIN conversation_messages cm ON cm.conversation_id = c.id
+         WHERE ${messageConditions.join(" AND ")}
          GROUP BY c.tenant_id
        ),
        analytics_stats AS (
@@ -822,7 +901,8 @@ export async function listTenantAnalyticsSummaries(): Promise<TenantAnalyticsSum
            COALESCE(SUM(total_tokens), 0) AS total_tokens,
            COUNT(*) FILTER (WHERE status <> 'completed') AS error_count,
            MAX(created_at) AS last_request_at
-         FROM conversation_analytics
+         FROM conversation_analytics ca
+         WHERE ${analyticsConditions.join(" AND ")}
          GROUP BY tenant_id
        )
        SELECT
@@ -838,11 +918,12 @@ export async function listTenantAnalyticsSummaries(): Promise<TenantAnalyticsSum
          COALESCE(ast.completion_tokens, 0) AS completion_tokens,
          COALESCE(ast.total_tokens, 0) AS total_tokens,
          COALESCE(ast.error_count, 0) AS error_count,
-         GREATEST(ms.last_conversation_at, ast.last_request_at) AS last_active_at
+         COALESCE(GREATEST(ms.last_conversation_at, ast.last_request_at), ms.last_conversation_at, ast.last_request_at) AS last_active_at
        FROM tenants t
        LEFT JOIN message_stats ms ON ms.tenant_id = t.id
        LEFT JOIN analytics_stats ast ON ast.tenant_id = t.id
-       ORDER BY COALESCE(ast.total_tokens, 0) DESC, t.created_at ASC`
+       ORDER BY COALESCE(ast.total_tokens, 0) DESC, t.created_at ASC`,
+      params
     );
 
     return result.rows.map(mapTenantAnalyticsSummary);
@@ -850,9 +931,67 @@ export async function listTenantAnalyticsSummaries(): Promise<TenantAnalyticsSum
 }
 
 export async function listRecentTenantSessionAnalytics(limit = 50): Promise<TenantSessionAnalyticsRecord[]> {
-  if (!hasDatabase()) return [];
+  const page = await listTenantSessionAnalyticsPage({ limit, offset: 0 });
+  return page.records;
+}
+
+export async function listTenantSessionAnalyticsPage(
+  filters: TenantSessionAnalyticsFilters = {}
+): Promise<TenantSessionAnalyticsPage> {
+  if (!hasDatabase()) {
+    return {
+      records: [],
+      totalCount: 0,
+      limit: Math.min(100, Math.max(10, Math.floor(filters.limit || 25))),
+      offset: Math.max(0, Math.floor(filters.offset || 0)),
+    };
+  }
   await ensurePlatformSchema();
   return withDb(async (client) => {
+    const params: unknown[] = [];
+    const conditions = ["1=1"];
+    const normalizedLimit = Math.min(100, Math.max(10, Math.floor(filters.limit || 25)));
+    const normalizedOffset = Math.max(0, Math.floor(filters.offset || 0));
+    const tenantIds = normalizeTextArray(filters.tenantIds);
+    const excludedTenantIds = normalizeTextArray(filters.excludedTenantIds);
+    const fromDate = normalizeDateStart(filters.fromDate);
+    const toDateExclusive = normalizeDateEndExclusive(filters.toDate);
+    const searchText = String(filters.query || "").trim();
+
+    if (tenantIds.length > 0) {
+      params.push(tenantIds);
+      conditions.push(`c.tenant_id = ANY($${params.length}::text[])`);
+    }
+
+    if (excludedTenantIds.length > 0) {
+      params.push(excludedTenantIds);
+      conditions.push(`NOT (c.tenant_id = ANY($${params.length}::text[]))`);
+    }
+
+    if (fromDate) {
+      params.push(fromDate);
+      conditions.push(`COALESCE(ast.last_request_at, c.updated_at) >= $${params.length}::timestamptz`);
+    }
+
+    if (toDateExclusive) {
+      params.push(toDateExclusive);
+      conditions.push(`COALESCE(ast.last_request_at, c.updated_at) < $${params.length}::timestamptz`);
+    }
+
+    if (searchText) {
+      params.push(`%${searchText}%`);
+      conditions.push(`(
+        c.session_id ILIKE $${params.length}
+        OR COALESCE(c.host_origin, '') ILIKE $${params.length}
+        OR t.name ILIKE $${params.length}
+        OR t.tenant_key ILIKE $${params.length}
+      )`);
+    }
+
+    if (filters.errorsOnly) {
+      conditions.push("COALESCE(ast.error_count, 0) > 0");
+    }
+
     const result = await client.query<ConversationAnalyticsSessionRow>(
       `WITH message_stats AS (
          SELECT
@@ -877,6 +1016,7 @@ export async function listRecentTenantSessionAnalytics(limit = 50): Promise<Tena
          FROM conversation_analytics
          GROUP BY tenant_id, session_id
        )
+       session_rows AS (
        SELECT
          t.id AS tenant_id,
          t.tenant_key,
@@ -898,12 +1038,22 @@ export async function listRecentTenantSessionAnalytics(limit = 50): Promise<Tena
        INNER JOIN tenants t ON t.id = c.tenant_id
        LEFT JOIN message_stats ms ON ms.conversation_id = c.id
        LEFT JOIN analytics_stats ast ON ast.tenant_id = c.tenant_id AND ast.session_id = c.session_id
-       ORDER BY COALESCE(ast.last_request_at, c.updated_at) DESC, c.updated_at DESC
-       LIMIT $1`,
-      [Math.max(1, Math.floor(limit))]
+       WHERE ${conditions.join(" AND ")}
+       )
+       SELECT session_rows.*, COUNT(*) OVER() AS total_count
+       FROM session_rows
+       ORDER BY COALESCE(session_rows.last_request_at, session_rows.updated_at) DESC, session_rows.updated_at DESC
+       LIMIT $${params.length + 1}
+       OFFSET $${params.length + 2}`,
+      [...params, normalizedLimit, normalizedOffset]
     );
 
-    return result.rows.map(mapTenantSessionAnalytics);
+    return {
+      records: result.rows.map(mapTenantSessionAnalytics),
+      totalCount: asCount(result.rows[0]?.total_count),
+      limit: normalizedLimit,
+      offset: normalizedOffset,
+    };
   });
 }
 
