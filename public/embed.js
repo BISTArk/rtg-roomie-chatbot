@@ -596,7 +596,15 @@
     // Restore previous widget open/closed state so the iframe loads at the
     // right size (no flash of the small pill when the chat was open).
     var wasOpen = safeGet(scopedStorageKey(STORAGE.WIDGET_OPEN)) === "1";
-    iframe.setAttribute("style", wasOpen ? OPEN_STYLE : CLOSED_STYLE);
+    var renderReady = false;
+
+    function getFrameStyle(open, visible) {
+      var style = open ? OPEN_STYLE : CLOSED_STYLE;
+      if (visible) return style;
+      return style + ";opacity:0;visibility:hidden;pointer-events:none";
+    }
+
+    iframe.setAttribute("style", getFrameStyle(wasOpen, renderReady));
     iframe.setAttribute("allow", "clipboard-write");
 
     var ready = false;
@@ -683,6 +691,11 @@
           handleReady();
           break;
 
+        case "shop-assist-widget-render-ready":
+          renderReady = true;
+          iframe.setAttribute("style", getFrameStyle(chatIsOpen, renderReady));
+          break;
+
         case "shop-assist-navigate":
           // Save pending product before navigating
           if (e.data.pendingProduct) {
@@ -722,14 +735,14 @@
           break;
 
         case "shop-assist-widget-open":
-          iframe.setAttribute("style", OPEN_STYLE);
+          iframe.setAttribute("style", getFrameStyle(true, renderReady));
           safeSet(scopedStorageKey(STORAGE.WIDGET_OPEN), "1");
           chatIsOpen = true;
           stopState3();
           break;
 
         case "shop-assist-widget-close":
-          iframe.setAttribute("style", CLOSED_STYLE);
+          iframe.setAttribute("style", getFrameStyle(false, renderReady));
           safeSet(scopedStorageKey(STORAGE.WIDGET_OPEN), "0");
           chatIsOpen = false;
           // Option A: restart the State 3 schedule from the close moment.

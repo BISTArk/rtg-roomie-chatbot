@@ -1429,6 +1429,17 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     handleSendRef.current = handleSend;
   }, [handleSend]);
 
+  useEffect(() => {
+    if (!embed || !loaded || typeof window === "undefined") return;
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "shop-assist-widget-render-ready" }, "*");
+    }
+  }, [embed, loaded]);
+
+  if (!loaded) {
+    return null;
+  }
+
   return (
     <div style={widgetThemeStyle}>
       {/* Toggle button — Shopping Assistant pill */}
