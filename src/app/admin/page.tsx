@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import AdminAnalyticsDashboard from "@/components/AdminAnalyticsDashboard";
 import AdminCreateTenantDialog from "@/components/AdminCreateTenantDialog";
 import AdminTenantWorkbench from "@/components/AdminTenantWorkbench";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,8 @@ import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/com
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import {
   getTenantDebugSnapshot,
+  listRecentTenantSessionAnalytics,
+  listTenantAnalyticsSummaries,
   listCatalogSources,
   listCatalogVersions,
   listTenants,
@@ -26,18 +29,27 @@ export default async function AdminPage() {
     versions: Awaited<ReturnType<typeof listCatalogVersions>>;
     debug: Awaited<ReturnType<typeof getTenantDebugSnapshot>>;
   }> = [];
+  let analyticsSummaries: Awaited<ReturnType<typeof listTenantAnalyticsSummaries>> = [];
+  let recentAnalyticsSessions: Awaited<ReturnType<typeof listRecentTenantSessionAnalytics>> = [];
   let databaseError = "";
 
   try {
     const tenants = await listTenants();
-    tenantDetails = await Promise.all(
-      tenants.map(async (tenant) => ({
-        tenant,
-        sources: await listCatalogSources(tenant.tenantId),
-        versions: await listCatalogVersions(tenant.tenantId),
-        debug: await getTenantDebugSnapshot(tenant.tenantId),
-      }))
-    );
+    const [details, summaries, sessions] = await Promise.all([
+      Promise.all(
+        tenants.map(async (tenant) => ({
+          tenant,
+          sources: await listCatalogSources(tenant.tenantId),
+          versions: await listCatalogVersions(tenant.tenantId),
+          debug: await getTenantDebugSnapshot(tenant.tenantId),
+        }))
+      ),
+      listTenantAnalyticsSummaries(),
+      listRecentTenantSessionAnalytics(40),
+    ]);
+    tenantDetails = details;
+    analyticsSummaries = summaries;
+    recentAnalyticsSessions = sessions;
   } catch (error) {
     databaseError =
       error instanceof Error
@@ -49,6 +61,9 @@ export default async function AdminPage() {
     ({ tenant }) => !isSeededDemoTenant(tenant.tenantKey)
   );
   const hiddenDemoTenantCount = tenantDetails.length - visibleTenantDetails.length;
+  const visibleTenantIds = new Set(visibleTenantDetails.map(({ tenant }) => tenant.tenantId));
+  const visibleAnalyticsSummaries = analyticsSummaries.filter((summary) => visibleTenantIds.has(summary.tenantId));
+  const visibleRecentAnalyticsSessions = recentAnalyticsSessions.filter((session) => visibleTenantIds.has(session.tenantId));
 
   return (
     <main className="min-h-screen px-6 py-10" style={{ background: "var(--widget-surface-alt)" }}>
@@ -118,6 +133,13 @@ export default async function AdminPage() {
           </div>
           </CardContent>
         </Card>
+
+        {!databaseError ? (
+          <AdminAnalyticsDashboard
+            summaries={visibleAnalyticsSummaries}
+            recentSessions={visibleRecentAnalyticsSessions}
+          />
+        ) : null}
 
         {hiddenDemoTenantCount > 0 ? (
           <Card>

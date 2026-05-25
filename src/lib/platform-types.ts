@@ -107,3 +107,38 @@ export interface CatalogSourceRecord {
   updatedAt: string;
   lastSyncedAt?: string | null;
 }
+
+export interface TenantAnalyticsSummary {
+  tenantId: string;
+  tenantKey: string;
+  tenantName: string;
+  sessionCount: number;
+  messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  requestCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  errorCount: number;
+  lastActiveAt?: string | null;
+}
+
+export interface TenantSessionAnalyticsRecord {
+  tenantId: string;
+  tenantKey: string;
+  tenantName: string;
+  sessionId: string;
+  hostOrigin?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRequestAt?: string | null;
+  messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  requestCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  errorCount: number;
+}

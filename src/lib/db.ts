@@ -145,6 +145,37 @@ export async function ensurePlatformSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation
           ON conversation_messages(conversation_id, sort_order);
 
+        CREATE TABLE IF NOT EXISTS conversation_analytics (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          session_id TEXT NOT NULL,
+          request_type TEXT NOT NULL,
+          conversation_stage TEXT,
+          model_key TEXT,
+          model_id TEXT,
+          provider_id TEXT,
+          input_message_count INTEGER NOT NULL DEFAULT 0,
+          prompt_tokens INTEGER NOT NULL DEFAULT 0,
+          completion_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens INTEGER NOT NULL DEFAULT 0,
+          response_char_count INTEGER NOT NULL DEFAULT 0,
+          finish_reason TEXT,
+          status TEXT NOT NULL DEFAULT 'completed',
+          error_text TEXT,
+          host_origin TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conversation_analytics_tenant_created
+          ON conversation_analytics(tenant_id, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_conversation_analytics_session
+          ON conversation_analytics(session_id, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_conversation_analytics_conversation
+          ON conversation_analytics(conversation_id, created_at DESC);
+
         CREATE TABLE IF NOT EXISTS visitor_profiles (
           id TEXT PRIMARY KEY,
           tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

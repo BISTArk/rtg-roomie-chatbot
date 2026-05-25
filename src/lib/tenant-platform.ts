@@ -13,10 +13,12 @@ import type {
   ShopifyInstallationRecord,
   ShopifyInstallStatus,
   TenantAiConfig,
+  TenantAnalyticsSummary,
   TenantBootstrap,
   TenantPromptConfig,
   TenantRecord,
   TenantRuntimeConfig,
+  TenantSessionAnalyticsRecord,
 } from "@/lib/platform-types";
 import type { PersistedChatMessage, SharedChatMessage } from "@/lib/chat-types";
 import type { VisitorProfile } from "@/lib/visitor-profile";
@@ -82,6 +84,88 @@ interface ShopifyInstallationRow {
   uninstalled_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface ConversationAnalyticsSummaryRow {
+  tenant_id: string;
+  tenant_key: string;
+  tenant_name: string;
+  session_count: string | number;
+  message_count: string | number;
+  user_message_count: string | number;
+  assistant_message_count: string | number;
+  request_count: string | number;
+  prompt_tokens: string | number;
+  completion_tokens: string | number;
+  total_tokens: string | number;
+  error_count: string | number;
+  last_active_at: string | null;
+}
+
+interface ConversationAnalyticsSessionRow {
+  tenant_id: string;
+  tenant_key: string;
+  tenant_name: string;
+  session_id: string;
+  host_origin: string | null;
+  created_at: string;
+  updated_at: string;
+  last_request_at: string | null;
+  message_count: string | number;
+  user_message_count: string | number;
+  assistant_message_count: string | number;
+  request_count: string | number;
+  prompt_tokens: string | number;
+  completion_tokens: string | number;
+  total_tokens: string | number;
+  error_count: string | number;
+}
+
+function asCount(value: string | number | null | undefined): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mapTenantAnalyticsSummary(row: ConversationAnalyticsSummaryRow): TenantAnalyticsSummary {
+  return {
+    tenantId: row.tenant_id,
+    tenantKey: row.tenant_key,
+    tenantName: row.tenant_name,
+    sessionCount: asCount(row.session_count),
+    messageCount: asCount(row.message_count),
+    userMessageCount: asCount(row.user_message_count),
+    assistantMessageCount: asCount(row.assistant_message_count),
+    requestCount: asCount(row.request_count),
+    promptTokens: asCount(row.prompt_tokens),
+    completionTokens: asCount(row.completion_tokens),
+    totalTokens: asCount(row.total_tokens),
+    errorCount: asCount(row.error_count),
+    lastActiveAt: row.last_active_at,
+  };
+}
+
+function mapTenantSessionAnalytics(row: ConversationAnalyticsSessionRow): TenantSessionAnalyticsRecord {
+  return {
+    tenantId: row.tenant_id,
+    tenantKey: row.tenant_key,
+    tenantName: row.tenant_name,
+    sessionId: row.session_id,
+    hostOrigin: row.host_origin,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastRequestAt: row.last_request_at,
+    messageCount: asCount(row.message_count),
+    userMessageCount: asCount(row.user_message_count),
+    assistantMessageCount: asCount(row.assistant_message_count),
+    requestCount: asCount(row.request_count),
+    promptTokens: asCount(row.prompt_tokens),
+    completionTokens: asCount(row.completion_tokens),
+    totalTokens: asCount(row.total_tokens),
+    errorCount: asCount(row.error_count),
+  };
 }
 
 function defaultTenantAiConfig(name: string): TenantAiConfig {
@@ -360,6 +444,36 @@ async function loadTenantDomains(client: PoolClient, tenantId: string): Promise<
   return result.rows.map((row) => row.hostname);
 }
 
+async function ensureConversationRecord(
+  client: PoolClient,
+  input: {
+    tenantId: string;
+    sessionId: string;
+    hostOrigin?: string | null;
+    lastPageUrl?: string | null;
+  }
+): Promise<string> {
+  const conversationResult = await client.query<{ id: string }>(
+    `INSERT INTO conversations (id, tenant_id, session_id, host_origin, last_page_url)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (tenant_id, session_id)
+     DO UPDATE SET
+       host_origin = COALESCE(EXCLUDED.host_origin, conversations.host_origin),
+       last_page_url = COALESCE(EXCLUDED.last_page_url, conversations.last_page_url),
+       updated_at = NOW()
+     RETURNING id`,
+    [
+      randomUUID(),
+      input.tenantId,
+      input.sessionId,
+      normalizeOrigin(input.hostOrigin),
+      input.lastPageUrl ?? null,
+    ]
+  );
+
+  return conversationResult.rows[0].id;
+}
+
 async function findPreferredTenantIdByDomains(
   client: PoolClient,
   hostnames: Array<string | null | undefined>
@@ -568,24 +682,12 @@ export async function saveSessionState(input: {
   await withDb(async (client) => {
     await client.query("BEGIN");
     try {
-      const conversationResult = await client.query<{ id: string }>(
-        `INSERT INTO conversations (id, tenant_id, session_id, host_origin, last_page_url)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (tenant_id, session_id)
-         DO UPDATE SET
-           host_origin = EXCLUDED.host_origin,
-           last_page_url = COALESCE(EXCLUDED.last_page_url, conversations.last_page_url),
-           updated_at = NOW()
-         RETURNING id`,
-        [
-          randomUUID(),
-          input.tenantId,
-          input.sessionId,
-          normalizeOrigin(input.hostOrigin),
-          input.lastPageUrl ?? null,
-        ]
-      );
-      const conversationId = conversationResult.rows[0].id;
+      const conversationId = await ensureConversationRecord(client, {
+        tenantId: input.tenantId,
+        sessionId: input.sessionId,
+        hostOrigin: input.hostOrigin,
+        lastPageUrl: input.lastPageUrl,
+      });
 
       await client.query(
         `DELETE FROM conversation_messages WHERE conversation_id = $1`,
@@ -616,6 +718,192 @@ export async function saveSessionState(input: {
       await client.query("ROLLBACK");
       throw error;
     }
+  });
+}
+
+export async function recordConversationAnalytics(input: {
+  tenantId: string;
+  sessionId: string;
+  requestType: string;
+  conversationStage?: string | null;
+  modelKey?: string | null;
+  modelId?: string | null;
+  providerId?: string | null;
+  inputMessageCount?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  responseCharCount?: number;
+  finishReason?: string | null;
+  status?: string | null;
+  errorText?: string | null;
+  hostOrigin?: string | null;
+}): Promise<void> {
+  if (!hasDatabase()) return;
+  await ensurePlatformSchema();
+
+  await withDb(async (client) => {
+    const conversationId = await ensureConversationRecord(client, {
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      hostOrigin: input.hostOrigin,
+    });
+
+    await client.query(
+      `INSERT INTO conversation_analytics (
+        id,
+        tenant_id,
+        conversation_id,
+        session_id,
+        request_type,
+        conversation_stage,
+        model_key,
+        model_id,
+        provider_id,
+        input_message_count,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        response_char_count,
+        finish_reason,
+        status,
+        error_text,
+        host_origin
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+      )`,
+      [
+        randomUUID(),
+        input.tenantId,
+        conversationId,
+        input.sessionId,
+        input.requestType.trim(),
+        input.conversationStage?.trim() || null,
+        input.modelKey?.trim() || null,
+        input.modelId?.trim() || null,
+        input.providerId?.trim() || null,
+        Math.max(0, Math.round(input.inputMessageCount || 0)),
+        Math.max(0, Math.round(input.promptTokens || 0)),
+        Math.max(0, Math.round(input.completionTokens || 0)),
+        Math.max(0, Math.round(input.totalTokens || 0)),
+        Math.max(0, Math.round(input.responseCharCount || 0)),
+        input.finishReason?.trim() || null,
+        input.status?.trim() || "completed",
+        input.errorText?.trim() || null,
+        normalizeOrigin(input.hostOrigin),
+      ]
+    );
+  });
+}
+
+export async function listTenantAnalyticsSummaries(): Promise<TenantAnalyticsSummary[]> {
+  if (!hasDatabase()) return [];
+  await ensurePlatformSchema();
+  return withDb(async (client) => {
+    const result = await client.query<ConversationAnalyticsSummaryRow>(
+      `WITH message_stats AS (
+         SELECT
+           c.tenant_id,
+           COUNT(DISTINCT c.session_id) AS session_count,
+           COUNT(cm.id) AS message_count,
+           COUNT(*) FILTER (WHERE cm.role = 'user') AS user_message_count,
+           COUNT(*) FILTER (WHERE cm.role = 'assistant') AS assistant_message_count,
+           MAX(c.updated_at) AS last_conversation_at
+         FROM conversations c
+         LEFT JOIN conversation_messages cm ON cm.conversation_id = c.id
+         GROUP BY c.tenant_id
+       ),
+       analytics_stats AS (
+         SELECT
+           tenant_id,
+           COUNT(*) AS request_count,
+           COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+           COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+           COALESCE(SUM(total_tokens), 0) AS total_tokens,
+           COUNT(*) FILTER (WHERE status <> 'completed') AS error_count,
+           MAX(created_at) AS last_request_at
+         FROM conversation_analytics
+         GROUP BY tenant_id
+       )
+       SELECT
+         t.id AS tenant_id,
+         t.tenant_key,
+         t.name AS tenant_name,
+         COALESCE(ms.session_count, 0) AS session_count,
+         COALESCE(ms.message_count, 0) AS message_count,
+         COALESCE(ms.user_message_count, 0) AS user_message_count,
+         COALESCE(ms.assistant_message_count, 0) AS assistant_message_count,
+         COALESCE(ast.request_count, 0) AS request_count,
+         COALESCE(ast.prompt_tokens, 0) AS prompt_tokens,
+         COALESCE(ast.completion_tokens, 0) AS completion_tokens,
+         COALESCE(ast.total_tokens, 0) AS total_tokens,
+         COALESCE(ast.error_count, 0) AS error_count,
+         GREATEST(ms.last_conversation_at, ast.last_request_at) AS last_active_at
+       FROM tenants t
+       LEFT JOIN message_stats ms ON ms.tenant_id = t.id
+       LEFT JOIN analytics_stats ast ON ast.tenant_id = t.id
+       ORDER BY COALESCE(ast.total_tokens, 0) DESC, t.created_at ASC`
+    );
+
+    return result.rows.map(mapTenantAnalyticsSummary);
+  });
+}
+
+export async function listRecentTenantSessionAnalytics(limit = 50): Promise<TenantSessionAnalyticsRecord[]> {
+  if (!hasDatabase()) return [];
+  await ensurePlatformSchema();
+  return withDb(async (client) => {
+    const result = await client.query<ConversationAnalyticsSessionRow>(
+      `WITH message_stats AS (
+         SELECT
+           c.id AS conversation_id,
+           COUNT(cm.id) AS message_count,
+           COUNT(*) FILTER (WHERE cm.role = 'user') AS user_message_count,
+           COUNT(*) FILTER (WHERE cm.role = 'assistant') AS assistant_message_count
+         FROM conversations c
+         LEFT JOIN conversation_messages cm ON cm.conversation_id = c.id
+         GROUP BY c.id
+       ),
+       analytics_stats AS (
+         SELECT
+           tenant_id,
+           session_id,
+           COUNT(*) AS request_count,
+           COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+           COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+           COALESCE(SUM(total_tokens), 0) AS total_tokens,
+           COUNT(*) FILTER (WHERE status <> 'completed') AS error_count,
+           MAX(created_at) AS last_request_at
+         FROM conversation_analytics
+         GROUP BY tenant_id, session_id
+       )
+       SELECT
+         t.id AS tenant_id,
+         t.tenant_key,
+         t.name AS tenant_name,
+         c.session_id,
+         c.host_origin,
+         c.created_at,
+         c.updated_at,
+         ast.last_request_at,
+         COALESCE(ms.message_count, 0) AS message_count,
+         COALESCE(ms.user_message_count, 0) AS user_message_count,
+         COALESCE(ms.assistant_message_count, 0) AS assistant_message_count,
+         COALESCE(ast.request_count, 0) AS request_count,
+         COALESCE(ast.prompt_tokens, 0) AS prompt_tokens,
+         COALESCE(ast.completion_tokens, 0) AS completion_tokens,
+         COALESCE(ast.total_tokens, 0) AS total_tokens,
+         COALESCE(ast.error_count, 0) AS error_count
+       FROM conversations c
+       INNER JOIN tenants t ON t.id = c.tenant_id
+       LEFT JOIN message_stats ms ON ms.conversation_id = c.id
+       LEFT JOIN analytics_stats ast ON ast.tenant_id = c.tenant_id AND ast.session_id = c.session_id
+       ORDER BY COALESCE(ast.last_request_at, c.updated_at) DESC, c.updated_at DESC
+       LIMIT $1`,
+      [Math.max(1, Math.floor(limit))]
+    );
+
+    return result.rows.map(mapTenantSessionAnalytics);
   });
 }
 
