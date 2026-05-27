@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { ensureTenantForShopifyStorefront } from "@/lib/tenant-platform";
+import { normalizeShopifyShopDomain } from "@/lib/shopify";
 
 function clean(value: string | null | undefined): string {
   return String(value || "").trim();
@@ -22,9 +23,9 @@ function normalizePlacement(value: string | null | undefined): "bottom-right" | 
 }
 
 export async function GET(request: NextRequest) {
-  const shop = clean(request.nextUrl.searchParams.get("shop"));
+  const shop = normalizeShopifyShopDomain(request.nextUrl.searchParams.get("shop"));
   if (!shop) {
-    return new Response("console.error('Shop Assist theme embed: missing shop parameter.');", {
+    return new Response("console.error('Shop Assist theme embed: missing or invalid shop parameter.');", {
       headers: {
         "Content-Type": "application/javascript; charset=utf-8",
       },

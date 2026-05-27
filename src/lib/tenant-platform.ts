@@ -4,6 +4,7 @@ import { DEFAULT_WIDGET_BRANDING, DEFAULT_WIDGET_THEME, SHOP_ASSIST_WIDGET_BRAND
 import { buildAccessoryCatalog, buildFullCatalogSnapshot } from "@/lib/tenant-catalog";
 import { ensurePlatformSchema, hasDatabase, withDb } from "@/lib/db";
 import { createTenantToken, normalizeHostname, normalizeOrigin, verifyTenantToken } from "@/lib/platform-security";
+import { normalizeShopifyShopDomain } from "@/lib/shopify";
 import type {
   CatalogDataset,
   CatalogSourceRecord,
@@ -1408,7 +1409,10 @@ export async function upsertTenantFromShopifyInstall(input: {
   }
 
   await ensurePlatformSchema();
-  const normalizedShopDomain = input.shopDomain.trim().toLowerCase();
+  const normalizedShopDomain = normalizeShopifyShopDomain(input.shopDomain);
+  if (!normalizedShopDomain) {
+    throw new Error("Invalid Shopify shop domain provided for tenant upsert.");
+  }
   const normalizedStorefrontDomain = input.storefrontDomain?.trim().toLowerCase() || null;
   const normalizedAdditionalDomains = [...new Set(
     (input.additionalDomains ?? [])
@@ -1581,7 +1585,7 @@ export async function ensureTenantForShopifyStorefront(input: {
   if (!hasDatabase()) return null;
 
   await ensurePlatformSchema();
-  const normalizedShopDomain = input.shopDomain.trim().toLowerCase();
+  const normalizedShopDomain = normalizeShopifyShopDomain(input.shopDomain);
   const normalizedStorefrontDomain = input.storefrontDomain?.trim().toLowerCase() || null;
   if (!normalizedShopDomain) return null;
 

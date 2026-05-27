@@ -1,6 +1,10 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import SessionMessagesModal from "@/components/SessionMessagesModal";
 import type {
   TenantSessionAnalyticsPage,
   TenantAnalyticsSummary,
@@ -59,6 +63,8 @@ export default function AdminAnalyticsDashboard({
     page: number;
   };
 }) {
+  const [selectedSession, setSelectedSession] = useState<TenantSessionAnalyticsRecord | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const totals = summaries.reduce(
     (acc, summary) => ({
       tenants: acc.tenants + 1,
@@ -121,24 +127,25 @@ export default function AdminAnalyticsDashboard({
     "inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition-colors";
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Analytics</CardTitle>
-        <CardDescription>
-          Database-backed usage across tenants, with overview totals plus a server-filtered session table.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="flex flex-wrap gap-2">
-          <Link href={buildHref({ tab: "overview", page: 1 })} className={tabClass(activeTab === "overview")} style={{ borderColor: "var(--widget-border)" }}>
-            Overview
-          </Link>
-          <Link href={buildHref({ tab: "sessions", page: 1 })} className={tabClass(activeTab === "sessions")} style={{ borderColor: "var(--widget-border)" }}>
-            Sessions
-          </Link>
-        </div>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Analytics</CardTitle>
+          <CardDescription>
+            Database-backed usage across tenants, with overview totals plus a server-filtered session table.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex flex-wrap gap-2">
+            <Link href={buildHref({ tab: "overview", page: 1 })} className={tabClass(activeTab === "overview")} style={{ borderColor: "var(--widget-border)" }}>
+              Overview
+            </Link>
+            <Link href={buildHref({ tab: "sessions", page: 1 })} className={tabClass(activeTab === "sessions")} style={{ borderColor: "var(--widget-border)" }}>
+              Sessions
+            </Link>
+          </div>
 
-        <form action="/admin/analytics" method="get" className="space-y-4 rounded-2xl border p-4" style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface-alt)" }}>
+          <form action="/admin/analytics" method="get" className="space-y-4 rounded-2xl border p-4" style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface-alt)" }}>
           <input type="hidden" name="tab" value={activeTab} />
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-6">
             <label className="space-y-2 xl:col-span-2">
@@ -317,7 +324,14 @@ export default function AdminAnalyticsDashboard({
                   </tr>
                 ) : (
                   recentSessions.map((session) => (
-                    <tr key={`${session.tenantId}:${session.sessionId}`} className="text-sm text-[var(--widget-text)]">
+                    <tr
+                      key={`${session.tenantId}:${session.sessionId}`}
+                      className="text-sm text-[var(--widget-text)] cursor-pointer hover:bg-[var(--widget-surface-alt)] transition-colors"
+                      onClick={() => {
+                        setSelectedSession(session);
+                        setIsModalOpen(true);
+                      }}
+                    >
                       <td className="px-4 py-3 align-top">
                         <div className="font-medium">{session.tenantName}</div>
                         <div className="text-xs text-[var(--widget-text-muted)]">{session.tenantKey}</div>
@@ -388,5 +402,14 @@ export default function AdminAnalyticsDashboard({
         ) : null}
       </CardContent>
     </Card>
+    <SessionMessagesModal
+      isOpen={isModalOpen}
+      session={selectedSession}
+      onClose={() => {
+        setIsModalOpen(false);
+        setSelectedSession(null);
+      }}
+    />
+    </>
   );
 }
