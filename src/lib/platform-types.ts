@@ -121,6 +121,7 @@ export interface TenantAnalyticsSummary {
   completionTokens: number;
   totalTokens: number;
   errorCount: number;
+  engagedSessionCount: number;
   lastActiveAt?: string | null;
 }
 

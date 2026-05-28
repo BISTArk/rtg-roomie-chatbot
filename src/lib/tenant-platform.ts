@@ -103,6 +103,7 @@ interface ConversationAnalyticsSummaryRow {
   completion_tokens: string | number;
   total_tokens: string | number;
   error_count: string | number;
+  engaged_session_count: string | number;
   last_active_at: string | null;
 }
 
@@ -148,6 +149,7 @@ function mapTenantAnalyticsSummary(row: ConversationAnalyticsSummaryRow): Tenant
     completionTokens: asCount(row.completion_tokens),
     totalTokens: asCount(row.total_tokens),
     errorCount: asCount(row.error_count),
+    engagedSessionCount: asCount(row.engaged_session_count),
     lastActiveAt: row.last_active_at,
   };
 }
@@ -893,6 +895,19 @@ export async function listTenantAnalyticsSummaries(
          WHERE ${messageConditions.join(" AND ")}
          GROUP BY c.tenant_id
        ),
+       session_engagement AS (
+         SELECT
+           c.tenant_id,
+           COUNT(DISTINCT CASE WHEN user_msg_count > 2 THEN c.session_id END) AS engaged_session_count
+         FROM conversations c
+         INNER JOIN (
+           SELECT conversation_id, COUNT(*) FILTER (WHERE role = 'user') AS user_msg_count
+           FROM conversation_messages
+           GROUP BY conversation_id
+         ) cm ON cm.conversation_id = c.id
+         WHERE ${messageConditions.join(" AND ")}
+         GROUP BY c.tenant_id
+       ),
        analytics_stats AS (
          SELECT
            tenant_id,
@@ -919,9 +934,11 @@ export async function listTenantAnalyticsSummaries(
          COALESCE(ast.completion_tokens, 0) AS completion_tokens,
          COALESCE(ast.total_tokens, 0) AS total_tokens,
          COALESCE(ast.error_count, 0) AS error_count,
+         COALESCE(se.engaged_session_count, 0) AS engaged_session_count,
          COALESCE(GREATEST(ms.last_conversation_at, ast.last_request_at), ms.last_conversation_at, ast.last_request_at) AS last_active_at
        FROM tenants t
        LEFT JOIN message_stats ms ON ms.tenant_id = t.id
+       LEFT JOIN session_engagement se ON se.tenant_id = t.id
        LEFT JOIN analytics_stats ast ON ast.tenant_id = t.id
        ORDER BY COALESCE(ast.total_tokens, 0) DESC, t.created_at ASC`,
       params

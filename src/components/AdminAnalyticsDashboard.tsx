@@ -69,6 +69,7 @@ export default function AdminAnalyticsDashboard({
     (acc, summary) => ({
       tenants: acc.tenants + 1,
       sessions: acc.sessions + summary.sessionCount,
+      engagedSessions: acc.engagedSessions + summary.engagedSessionCount,
       requests: acc.requests + summary.requestCount,
       totalTokens: acc.totalTokens + summary.totalTokens,
       promptTokens: acc.promptTokens + summary.promptTokens,
@@ -78,6 +79,7 @@ export default function AdminAnalyticsDashboard({
     {
       tenants: 0,
       sessions: 0,
+      engagedSessions: 0,
       requests: 0,
       totalTokens: 0,
       promptTokens: 0,
@@ -232,9 +234,10 @@ export default function AdminAnalyticsDashboard({
           </div>
         </form>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <TotalsCard label="Tenants" value={formatCount(totals.tenants)} helper="Tracked merchant tenants" />
           <TotalsCard label="Sessions" value={formatCount(totals.sessions)} helper="Distinct chat sessions saved" />
+          <TotalsCard label="Engaged" value={formatCount(totals.engagedSessions)} helper="Sessions with >2 user messages" />
           <TotalsCard label="Requests" value={formatCount(totals.requests)} helper="Model calls logged in analytics" />
           <TotalsCard label="Tokens" value={formatCount(totals.totalTokens)} helper={`${formatCount(totals.promptTokens)} prompt / ${formatCount(totals.completionTokens)} completion`} />
           <TotalsCard label="Errors" value={formatCount(totals.errors)} helper="Blocked or failed analytics events" />
@@ -248,6 +251,7 @@ export default function AdminAnalyticsDashboard({
                 <tr className="text-left text-xs uppercase tracking-[0.16em] text-[var(--widget-text-muted)]">
                   <th className="px-4 py-3 font-medium">Tenant</th>
                   <th className="px-4 py-3 font-medium">Sessions</th>
+                  <th className="px-4 py-3 font-medium">Engaged</th>
                   <th className="px-4 py-3 font-medium">Messages</th>
                   <th className="px-4 py-3 font-medium">Requests</th>
                   <th className="px-4 py-3 font-medium">Prompt Tokens</th>
@@ -259,7 +263,7 @@ export default function AdminAnalyticsDashboard({
               <tbody className="divide-y" style={{ borderColor: "var(--widget-border)" }}>
                 {summaries.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-6 text-sm text-[var(--widget-text-muted)]">
+                    <td colSpan={9} className="px-4 py-6 text-sm text-[var(--widget-text-muted)]">
                       No analytics rows yet. Once tenants start sending chat traffic through the instrumented API, usage will appear here.
                     </td>
                   </tr>
@@ -271,6 +275,10 @@ export default function AdminAnalyticsDashboard({
                         <div className="text-xs text-[var(--widget-text-muted)]">{summary.tenantKey}</div>
                       </td>
                       <td className="px-4 py-3">{formatCount(summary.sessionCount)}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{formatCount(summary.engagedSessionCount)}</div>
+                        <div className="text-xs text-[var(--widget-text-muted)]">{summary.sessionCount > 0 ? Math.round((summary.engagedSessionCount / summary.sessionCount) * 100) : 0}% rate</div>
+                      </td>
                       <td className="px-4 py-3">
                         {formatCount(summary.messageCount)}
                         <div className="text-xs text-[var(--widget-text-muted)]">
