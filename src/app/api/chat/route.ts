@@ -18,14 +18,18 @@ import {
 } from "@/lib/system-prompt";
 import {
   buildCatalogPlaceholder,
+  formatRetrievedCatalog,
   getLastUserText,
   needsCatalogRetrieval,
+  planCatalogIntent,
+  queryCatalogFromRows,
+  resolveCatalogMode,
 } from "@/lib/catalog-retrieval";
 import { inferStage, stripStageTag } from "@/lib/stage-tag";
 import { isComplaintMessage } from "@/lib/complaint-detection";
 import { getWelcomeMessage } from "@/lib/widget-config";
 import type { WidgetBranding } from "@/lib/widget-config";
-import { buildTenantCatalogContext, recordConversationAnalytics, resolveTenantFromToken } from "@/lib/tenant-platform";
+import { buildTenantCatalogContext, getActiveCatalogDataset, recordConversationAnalytics, resolveTenantFromToken } from "@/lib/tenant-platform";
 
 export const maxDuration = 60;
 
@@ -225,6 +229,7 @@ async function resolveCatalogForStage(input: {
   tenantId: string;
   stage: ConversationStage;
   type?: ChatRequestBody["type"];
+  plannerModel: Parameters<typeof planCatalogIntent>[0]["model"];
   plainMessages: Array<{ role: "user" | "assistant"; text: string }>;
   pageContext?: PageContext;
   browsingHistory?: BrowsingHistoryEntry[];
@@ -249,19 +254,63 @@ async function resolveCatalogForStage(input: {
     };
   }
 
-  const runtimeCatalog = await buildTenantCatalogContext(
-    input.tenantId,
-    input.pageContext?.cartItems
-  );
+  const mode = resolveCatalogMode(process.env.CATALOG_MODE);
+  if (mode === "full") {
+    const runtimeCatalog = await buildTenantCatalogContext(
+      input.tenantId,
+      input.pageContext?.cartItems
+    );
+    return {
+      catalogData: runtimeCatalog.catalogData,
+      accessoryData: runtimeCatalog.accessoryData,
+      retrievalMeta: {
+        intentSummary: `tenant_full_catalog:${getLastUserText(input.plainMessages) || "n/a"}`,
+        sql: "tenant_catalog_snapshot",
+        rowCount: runtimeCatalog.catalogData.includes("(none)") ? 0 : undefined,
+        relaxed: false,
+        filterSummary: "full_catalog=yes",
+      },
+    };
+  }
+
+  const dataset = await getActiveCatalogDataset(input.tenantId);
+  if (!dataset || dataset.rows.length === 0) {
+    return {
+      catalogData: "# RETRIEVED CATALOG CONTEXT\n\n(no active tenant catalog snapshot)\n\n## CATALOG DATA\n\n(none)",
+      retrievalMeta: {
+        intentSummary: "retrieval_mode:no_active_catalog",
+        sql: "-- skipped",
+        rowCount: 0,
+        relaxed: false,
+        filterSummary: "active_catalog=no",
+      },
+    };
+  }
+
+  const intent = await planCatalogIntent({
+    model: input.plannerModel,
+    stage: input.stage,
+    messages: input.plainMessages,
+    pageContext: input.pageContext,
+    browsingHistory: input.browsingHistory,
+  });
+
+  const execution = await queryCatalogFromRows(dataset.rows, intent, {
+    stage: input.stage,
+    rawUserRequest: getLastUserText(input.plainMessages),
+    pageContext: input.pageContext,
+    browsingHistory: input.browsingHistory,
+    visitorProfile: input.visitorProfile,
+  });
+
   return {
-    catalogData: runtimeCatalog.catalogData,
-    accessoryData: runtimeCatalog.accessoryData,
+    catalogData: formatRetrievedCatalog(execution, { intent }),
     retrievalMeta: {
-      intentSummary: `tenant_full_catalog:${getLastUserText(input.plainMessages) || "n/a"}`,
-      sql: "tenant_catalog_snapshot",
-      rowCount: runtimeCatalog.catalogData.includes("(none)") ? 0 : undefined,
-      relaxed: false,
-      filterSummary: "full_catalog=yes",
+      intentSummary: intent.intent_summary,
+      sql: execution.sql,
+      rowCount: execution.rows.length,
+      relaxed: execution.relaxed,
+      filterSummary: execution.appliedFilters.length > 0 ? execution.appliedFilters.join("; ") : "(none)",
     },
   };
 }
@@ -377,6 +426,7 @@ export async function POST(request: Request) {
       console.log("[chat route] → returning path");
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
+        plannerModel: chatModel,
         stage: "returning",
         type,
         plainMessages,
@@ -427,6 +477,7 @@ export async function POST(request: Request) {
       console.log("[chat route] → reengagement path");
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
+        plannerModel: chatModel,
         stage: "reengagement",
         type,
         plainMessages,
@@ -476,6 +527,7 @@ export async function POST(request: Request) {
       console.log("[chat route] → contextual path, product:", pageContext.productName);
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
+        plannerModel: chatModel,
         stage: "contextual",
         type,
         plainMessages,
@@ -540,6 +592,7 @@ export async function POST(request: Request) {
       console.log("[chat route] → new-session path");
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
+        plannerModel: chatModel,
         stage: "new-session",
         type,
         plainMessages,
@@ -584,6 +637,7 @@ export async function POST(request: Request) {
       console.log("[chat route] → interjection path, subtype:", interjectionType);
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
+        plannerModel: chatModel,
         stage: "interjection",
         type,
         plainMessages,
@@ -638,6 +692,7 @@ IMPORTANT context to weave in:
     if (type === "upsell") {
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
+        plannerModel: chatModel,
         stage: "upsell",
         type,
         plainMessages,
@@ -726,6 +781,7 @@ IMPORTANT context to weave in:
 
     const retrieval = await resolveCatalogForStage({
       tenantId: tenant.tenantId,
+      plannerModel: chatModel,
       stage: currentStage,
       type,
       plainMessages,

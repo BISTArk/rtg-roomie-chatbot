@@ -84,6 +84,9 @@ export type CatalogMode = "retrieval" | "full";
 let sqlModulePromise: Promise<SqlJsStatic> | null = null;
 let catalogDbBytes: Uint8Array | null = null;
 
+const INTEGER_COLUMNS = new Set(["count_of_reviews"]);
+const REAL_COLUMNS = new Set(["avg_star_rating", "sale_price", "regular_price", "discount_percent"]);
+
 function getSqlModule(): Promise<SqlJsStatic> {
   if (!sqlModulePromise) {
     sqlModulePromise = initSqlJs();
@@ -101,6 +104,78 @@ function getCatalogDbBytes(): Uint8Array {
 export async function loadCatalogDb(): Promise<Database> {
   const SQL = await getSqlModule();
   return new SQL.Database(getCatalogDbBytes());
+}
+
+function normalizeKey(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/[%]/g, " percent ")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_")
+    .toLowerCase();
+}
+
+function coerceValueForColumn(column: string, value: unknown): string | number | null {
+  const raw = value == null ? "" : String(value).trim();
+  if (!raw) return null;
+
+  if (INTEGER_COLUMNS.has(column)) {
+    const parsed = Number.parseInt(raw.replace(/[^0-9-]/g, ""), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (REAL_COLUMNS.has(column)) {
+    const parsed = Number.parseFloat(raw.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return raw;
+}
+
+function normalizeRowForCatalogColumns(
+  row: Record<string, string | number | null | undefined>
+): RetrievedCatalogRow {
+  const lookup = new Map<string, unknown>();
+  for (const [key, value] of Object.entries(row)) {
+    lookup.set(normalizeKey(key), value);
+  }
+
+  const normalized: RetrievedCatalogRow = {};
+  for (const column of CATALOG_COLUMNS) {
+    const header = COLUMN_TO_HEADER[column] ?? column;
+    const value =
+      lookup.get(normalizeKey(column)) ??
+      lookup.get(normalizeKey(header));
+    normalized[column] = coerceValueForColumn(column, value);
+  }
+  return normalized;
+}
+
+function getColumnType(column: string): "TEXT" | "INTEGER" | "REAL" {
+  if (INTEGER_COLUMNS.has(column)) return "INTEGER";
+  if (REAL_COLUMNS.has(column)) return "REAL";
+  return "TEXT";
+}
+
+async function buildCatalogDbFromRows(
+  rows: Array<Record<string, string | number | null | undefined>>
+): Promise<Database> {
+  const SQL = await getSqlModule();
+  const db = new SQL.Database();
+  db.run(
+    `CREATE TABLE catalog_products (${CATALOG_COLUMNS.map((column) => `"${column}" ${getColumnType(column)}`).join(", ")});`
+  );
+
+  const insertSql = `INSERT INTO catalog_products (${CATALOG_COLUMNS.map((column) => `"${column}"`).join(", ")}) VALUES (${CATALOG_COLUMNS.map(() => "?").join(", ")});`;
+  const stmt = db.prepare(insertSql);
+  for (const row of rows) {
+    const normalized = normalizeRowForCatalogColumns(row);
+    stmt.run(CATALOG_COLUMNS.map((column) => normalized[column] ?? null));
+  }
+  stmt.free();
+
+  return db;
 }
 
 export function resolveCatalogMode(rawMode: string | undefined): CatalogMode {
@@ -460,57 +535,78 @@ function findSimilarRows(db: Database, anchorName: string, limit: number): Retri
   return executeSql(db, sql, params);
 }
 
+function runCatalogQueryWithDb(
+  db: Database,
+  intent: CatalogIntent,
+  context: RetrievedCatalogContext
+): CatalogQueryExecution {
+  if (intent.mode === "none" || intent.limit === 0) {
+    return {
+      rows: [],
+      sql: "-- no catalog query executed",
+      params: [],
+      appliedFilters: [],
+      relaxed: false,
+    };
+  }
+
+  if (looksLikeSimilarRequest(context.rawUserRequest) && intent.product_names.length > 0) {
+    const rows = findSimilarRows(db, intent.product_names[0], intent.limit || PRODUCT_RESULT_LIMIT);
+    if (rows.length > 0) {
+      return {
+        rows,
+        sql: "-- similar-product expansion query",
+        params: [intent.product_names[0]],
+        appliedFilters: [`similar_to=${intent.product_names[0]}`],
+        relaxed: false,
+      };
+    }
+  }
+
+  const firstPass = buildQueryExecution(intent);
+  let rows = executeSql(db, firstPass.sql, firstPass.params);
+  if (rows.length > 0) {
+    return {
+      rows,
+      sql: firstPass.sql,
+      params: firstPass.params,
+      appliedFilters: firstPass.appliedFilters,
+      relaxed: false,
+    };
+  }
+
+  const relaxedIntent = buildRelaxedIntent(intent);
+  const secondPass = buildQueryExecution(relaxedIntent);
+  rows = executeSql(db, secondPass.sql, secondPass.params);
+  return {
+    rows,
+    sql: secondPass.sql,
+    params: secondPass.params,
+    appliedFilters: secondPass.appliedFilters,
+    relaxed: true,
+  };
+}
+
 export async function queryCatalog(
   intent: CatalogIntent,
   context: RetrievedCatalogContext
 ): Promise<CatalogQueryExecution> {
   const db = await loadCatalogDb();
   try {
-    if (intent.mode === "none" || intent.limit === 0) {
-      return {
-        rows: [],
-        sql: "-- no catalog query executed",
-        params: [],
-        appliedFilters: [],
-        relaxed: false,
-      };
-    }
+    return runCatalogQueryWithDb(db, intent, context);
+  } finally {
+    db.close();
+  }
+}
 
-    if (looksLikeSimilarRequest(context.rawUserRequest) && intent.product_names.length > 0) {
-      const rows = findSimilarRows(db, intent.product_names[0], intent.limit || PRODUCT_RESULT_LIMIT);
-      if (rows.length > 0) {
-        return {
-          rows,
-          sql: "-- similar-product expansion query",
-          params: [intent.product_names[0]],
-          appliedFilters: [`similar_to=${intent.product_names[0]}`],
-          relaxed: false,
-        };
-      }
-    }
-
-    const firstPass = buildQueryExecution(intent);
-    let rows = executeSql(db, firstPass.sql, firstPass.params);
-    if (rows.length > 0) {
-      return {
-        rows,
-        sql: firstPass.sql,
-        params: firstPass.params,
-        appliedFilters: firstPass.appliedFilters,
-        relaxed: false,
-      };
-    }
-
-    const relaxedIntent = buildRelaxedIntent(intent);
-    const secondPass = buildQueryExecution(relaxedIntent);
-    rows = executeSql(db, secondPass.sql, secondPass.params);
-    return {
-      rows,
-      sql: secondPass.sql,
-      params: secondPass.params,
-      appliedFilters: secondPass.appliedFilters,
-      relaxed: true,
-    };
+export async function queryCatalogFromRows(
+  rows: Array<Record<string, string | number | null | undefined>>,
+  intent: CatalogIntent,
+  context: RetrievedCatalogContext
+): Promise<CatalogQueryExecution> {
+  const db = await buildCatalogDbFromRows(rows);
+  try {
+    return runCatalogQueryWithDb(db, intent, context);
   } finally {
     db.close();
   }

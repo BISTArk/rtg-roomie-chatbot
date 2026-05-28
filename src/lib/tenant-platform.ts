@@ -1967,34 +1967,8 @@ export async function buildTenantCatalogContext(tenantId: string, cartItems?: st
   accessoryData?: string;
 }> {
   if (!hasDatabase()) {
-    const execution = await queryFullCatalog();
-    const rows = execution.rows.map((row) =>
-      Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key, value == null ? "" : String(value)])
-      )
-    );
     return {
-      catalogData: formatRetrievedCatalog(execution, {
-        intent: {
-          mode: "product_search",
-          intent_summary: "Local fallback full catalog snapshot.",
-          category: null,
-          product_names: [],
-          brands: [],
-          mattress_sizes: [],
-          mattress_types: [],
-          sleep_positions: [],
-          support_levels: [],
-          temperature_management: [],
-          comfort: [],
-          discount_only: false,
-          price_min: null,
-          price_max: null,
-          sort: "relevance",
-          limit: rows.length,
-        },
-      }),
-      accessoryData: buildAccessoryCatalog(rows, cartItems),
+      catalogData: "# RETRIEVED CATALOG CONTEXT\n\n(database not configured)\n\n## CATALOG DATA\n\n(none)",
     };
   }
 
