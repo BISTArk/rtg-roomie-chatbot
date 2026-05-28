@@ -162,13 +162,17 @@ async function buildCatalogDbFromRows(
   rows: Array<Record<string, string | number | null | undefined>>
 ): Promise<Database> {
   const SQL = await getSqlModule();
-  const db = new SQL.Database();
+  const db = new SQL.Database() as Database & {
+    run: (sql: string, params?: Array<string | number | null>) => void;
+  };
   db.run(
     `CREATE TABLE catalog_products (${CATALOG_COLUMNS.map((column) => `"${column}" ${getColumnType(column)}`).join(", ")});`
   );
 
   const insertSql = `INSERT INTO catalog_products (${CATALOG_COLUMNS.map((column) => `"${column}"`).join(", ")}) VALUES (${CATALOG_COLUMNS.map(() => "?").join(", ")});`;
-  const stmt = db.prepare(insertSql);
+  const stmt = db.prepare(insertSql) as ReturnType<Database["prepare"]> & {
+    run: (params?: Array<string | number | null>) => void;
+  };
   for (const row of rows) {
     const normalized = normalizeRowForCatalogColumns(row);
     stmt.run(CATALOG_COLUMNS.map((column) => normalized[column] ?? null));
