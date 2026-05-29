@@ -76,6 +76,12 @@ export async function ensurePlatformSchema(): Promise<void> {
         ALTER TABLE tenants
           ADD COLUMN IF NOT EXISTS ai_config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 
+        ALTER TABLE tenants
+          ADD COLUMN IF NOT EXISTS system_prompt_text TEXT;
+
+        ALTER TABLE tenants
+          ADD COLUMN IF NOT EXISTS skill_prompts_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+
         CREATE TABLE IF NOT EXISTS tenant_domains (
           id TEXT PRIMARY KEY,
           tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

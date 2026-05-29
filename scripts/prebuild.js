@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Prebuild: converts Excel catalog, SYSTEM_PROMPT.md, and skills/*.md into
  * importable data files under src/data/.
@@ -48,10 +49,6 @@ function toSnakeCase(value) {
 
 function escapeSqlIdentifier(value) {
   return `"${String(value).replace(/"/g, "\"\"")}"`;
-}
-
-function escapeSqlString(value) {
-  return String(value).replace(/'/g, "''");
 }
 
 function inferColumnType(column) {

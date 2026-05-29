@@ -4,6 +4,22 @@ import type { VisitorProfile } from "@/lib/visitor-profile";
 
 export type CatalogSourceType = "excel" | "postgres" | "shopify";
 
+export type TenantPromptStage =
+  | "returning"
+  | "greeting"
+  | "discovery"
+  | "recommendation"
+  | "comparison"
+  | "closing"
+  | "reengagement"
+  | "contextual"
+  | "new-session"
+  | "interjection"
+  | "upsell"
+  | "complaint";
+
+export type TenantSkillPrompts = Partial<Record<TenantPromptStage, string>>;
+
 export interface TenantAiConfig {
   businessSummary?: string;
   brandVoice?: string;
@@ -57,6 +73,8 @@ export interface TenantRuntimeConfig {
   branding: Partial<WidgetBranding>;
   prompt: TenantPromptConfig;
   aiConfig: TenantAiConfig;
+  systemPrompt: string | null;
+  skillPrompts: TenantSkillPrompts;
 }
 
 export interface TenantRecord extends TenantRuntimeConfig {

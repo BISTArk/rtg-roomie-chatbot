@@ -24,8 +24,10 @@ import {
 import type {
   CatalogSourceRecord,
   CatalogVersionRecord,
+  TenantPromptStage,
   TenantRecord,
 } from "@/lib/platform-types";
+import { getDefaultSkillPrompt, getDefaultSystemPrompt } from "@/lib/system-prompt";
 
 interface TenantDebugSnapshot {
   conversations: Array<{ sessionId: string; updatedAt: string }>;
@@ -39,21 +41,54 @@ interface TenantWorkbenchItem {
   debug: TenantDebugSnapshot;
 }
 
-type ModalType = "stack" | "tune" | "ops" | "debug";
+type ModalType = "prompts" | "ops" | "debug";
 
 type ActiveModal = {
   tenantId: string;
   type: ModalType;
 } | null;
 
+type PromptEditorDraft = {
+  name: string;
+  appName: string;
+  appUrl: string;
+  assistantName: string;
+  launcherLabel: string;
+  headerTitle: string;
+  inputPlaceholder: string;
+  supportUrl: string;
+  storeLocatorUrl: string;
+  handoffDescription: string;
+  systemPrompt: string;
+  skillPrompts: Record<TenantPromptStage, string>;
+};
+
+const PROMPT_STAGE_CONFIG: Array<{
+  stage: TenantPromptStage;
+  label: string;
+  description: string;
+}> = [
+  { stage: "returning", label: "Returning", description: "Used when a known shopper comes back and the assistant should pick up continuity naturally." },
+  { stage: "greeting", label: "Greeting", description: "Handles the first welcome turn and frames the conversation tone." },
+  { stage: "discovery", label: "Discovery", description: "Guides questioning, needs assessment, and qualification." },
+  { stage: "recommendation", label: "Recommendation", description: "Controls how the assistant recommends products from the catalog." },
+  { stage: "comparison", label: "Comparison", description: "Shapes side-by-side comparison responses when shoppers weigh options." },
+  { stage: "closing", label: "Closing", description: "Handles conversion, urgency, reassurance, and purchase nudges." },
+  { stage: "reengagement", label: "Reengagement", description: "Used for proactive follow-up after activity or silence." },
+  { stage: "contextual", label: "Contextual", description: "Used for short proactive prompts based on page context and browsing signals." },
+  { stage: "new-session", label: "New Session", description: "Used when a brand-new session starts and the assistant initiates lightly." },
+  { stage: "interjection", label: "Interjection", description: "Used for short interruptions or quick helper messages during flow changes." },
+  { stage: "upsell", label: "Upsell", description: "Used for accessories, add-ons, bundles, and complementary item suggestions." },
+  { stage: "complaint", label: "Complaint", description: "Used when complaint detection forces a service-recovery response." },
+];
+
+const DEFAULT_SYSTEM_PROMPT = getDefaultSystemPrompt();
+const DEFAULT_SKILL_PROMPTS = Object.fromEntries(
+  PROMPT_STAGE_CONFIG.map(({ stage }) => [stage, getDefaultSkillPrompt(stage)])
+) as Record<TenantPromptStage, string>;
+
 function getShopifyConnectDomain(domains: string[]): string {
   return domains.find((domain) => domain.endsWith(".myshopify.com")) || "";
-}
-
-function summarizeText(value: string | undefined, fallback: string): string {
-  const text = value?.trim();
-  if (!text) return fallback;
-  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
 }
 
 function formatDateTime(value: string): string {
@@ -64,19 +99,28 @@ function formatDateTime(value: string): string {
   }
 }
 
-function stageGuidanceEntries(tenant: TenantRecord): Array<{ label: string; value?: string }> {
-  return [
-    { label: "Discovery", value: tenant.aiConfig.discoveryGuidance },
-    { label: "Recommendations", value: tenant.aiConfig.recommendationGuidance },
-    { label: "Comparisons", value: tenant.aiConfig.comparisonGuidance },
-    { label: "Closing / Upsell", value: tenant.aiConfig.closingGuidance },
-    { label: "Proactive", value: tenant.aiConfig.proactiveGuidance },
-    { label: "Complaint", value: tenant.aiConfig.complaintGuidance },
-  ];
+function configuredSkillPromptCount(tenant: TenantRecord): number {
+  return PROMPT_STAGE_CONFIG.filter(({ stage }) => tenant.skillPrompts[stage]?.trim()).length;
 }
 
-function configuredStageGuidanceCount(tenant: TenantRecord): number {
-  return stageGuidanceEntries(tenant).filter((entry) => entry.value?.trim()).length;
+function buildPromptEditorDraft(tenant: TenantRecord): PromptEditorDraft {
+  return {
+    name: tenant.name,
+    appName: tenant.appName,
+    appUrl: tenant.appUrl,
+    assistantName: tenant.branding.assistantName || "",
+    launcherLabel: tenant.branding.launcherLabel || "",
+    headerTitle: tenant.branding.headerTitle || "",
+    inputPlaceholder: tenant.branding.inputPlaceholder || "",
+    supportUrl: tenant.prompt.supportUrl || "",
+    storeLocatorUrl: tenant.prompt.storeLocatorUrl || "",
+    handoffDescription: tenant.prompt.handoffDescription || "",
+    systemPrompt: tenant.systemPrompt || "",
+    skillPrompts: PROMPT_STAGE_CONFIG.reduce<Record<TenantPromptStage, string>>((accumulator, { stage }) => {
+      accumulator[stage] = tenant.skillPrompts[stage] || "";
+      return accumulator;
+    }, {} as Record<TenantPromptStage, string>),
+  };
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
@@ -162,6 +206,7 @@ function ModalDialog({
 
 export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails: TenantWorkbenchItem[] }) {
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+  const [promptDraft, setPromptDraft] = useState<PromptEditorDraft | null>(null);
 
   const selected = useMemo(() => {
     if (!activeModal) return null;
@@ -174,16 +219,16 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
         <CardHeader>
           <CardTitle>Tenant workspace</CardTitle>
           <CardDescription>
-            Browse merchants in a cleaner accordion, then open focused shadcn-style dialogs for tuning, prompt context, operations, and debugging.
+            Browse merchants, edit tenant-owned prompts directly, and manage catalog, domains, and recent activity in focused dialogs.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Accordion type="single" defaultValue={tenantDetails[0]?.tenant.tenantId ?? null} collapsible>
+          <Accordion type="single" defaultValue={tenantDetails[0]?.tenant.tenantId} collapsible>
             {tenantDetails.map(({ tenant, sources, versions, debug }) => {
               const shopifyConnectDomain = getShopifyConnectDomain(tenant.allowedDomains);
-              const shopifySource = sources.find((source) => source.type === "shopify");
-              const configuredGuidance = configuredStageGuidanceCount(tenant);
+              const configuredSkillPrompts = configuredSkillPromptCount(tenant);
               const isShopifyConnected = Boolean(tenant.shopifyInstallation);
+              const systemPromptStatus = tenant.systemPrompt?.trim() ? "Custom prompt saved" : "Using shared default";
 
               return (
                 <AccordionItem
@@ -209,17 +254,14 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                           <Badge variant="outline">{tenant.allowedDomains.length} domains</Badge>
                           <Badge variant="outline">{versions.length} catalog versions</Badge>
                           <Badge variant="outline">{debug.conversations.length} saved sessions</Badge>
-                          <Badge variant="outline">{configuredGuidance} stage overrides</Badge>
+                          <Badge variant="outline">{configuredSkillPrompts} skill overrides</Badge>
                         </div>
                       </div>
                       <div className="grid min-w-[240px] grid-cols-1 gap-3 sm:grid-cols-2">
+                        <MetricCard label="System prompt" value={systemPromptStatus} />
                         <MetricCard
-                          label="AI summary"
-                          value={tenant.aiConfig.brandVoice?.trim() || "Using default voice"}
-                        />
-                        <MetricCard
-                          label="Catalog"
-                          value={shopifySource ? "Shopify sync ready" : "No Shopify source yet"}
+                          label="Skills"
+                          value={configuredSkillPrompts > 0 ? `${configuredSkillPrompts} custom skills` : "All skills on shared defaults"}
                         />
                       </div>
                     </div>
@@ -231,23 +273,32 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                         <CardHeader className="pb-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <CardTitle className="text-lg">Tenant AI context</CardTitle>
+                              <CardTitle className="text-lg">Prompt editor</CardTitle>
                               <CardDescription>
-                                Per-tenant prompt blocks injected into chat so each merchant can be tuned separately.
+                                Edit the full tenant system prompt and any stage skill prompts directly, with shared markdown files as fallback when left blank.
                               </CardDescription>
                             </div>
-                            <Button size="sm" onClick={() => setActiveModal({ tenantId: tenant.tenantId, type: "tune" })}>
-                              Tune
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setPromptDraft(buildPromptEditorDraft(tenant));
+                                setActiveModal({ tenantId: tenant.tenantId, type: "prompts" });
+                              }}
+                            >
+                              Edit prompts
                             </Button>
                           </div>
                         </CardHeader>
                         <CardContent className="space-y-3">
-                          <MetricCard label="Business summary" value={summarizeText(tenant.aiConfig.businessSummary, "No tenant-specific summary yet.")} />
-                          <MetricCard label="Extra instructions" value={summarizeText(tenant.aiConfig.extraInstructions, "No extra instructions configured.")} />
+                          <MetricCard label="System prompt" value={systemPromptStatus} />
+                          <MetricCard
+                            label="Skill prompt coverage"
+                            value={configuredSkillPrompts > 0 ? `${configuredSkillPrompts} tenant-owned skill prompts` : "No custom skills yet"}
+                          />
                           <div className="flex flex-wrap gap-2">
-                            {stageGuidanceEntries(tenant).map((entry) => (
-                              <Badge key={entry.label} variant={entry.value?.trim() ? "default" : "secondary"}>
-                                {entry.label} {entry.value?.trim() ? "tuned" : "default"}
+                            {PROMPT_STAGE_CONFIG.map(({ stage, label }) => (
+                              <Badge key={stage} variant={tenant.skillPrompts[stage]?.trim() ? "default" : "secondary"}>
+                                {label} {tenant.skillPrompts[stage]?.trim() ? "custom" : "default"}
                               </Badge>
                             ))}
                           </div>
@@ -256,22 +307,15 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
 
                       <Card>
                         <CardHeader className="pb-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <CardTitle className="text-lg">Prompt stack</CardTitle>
-                              <CardDescription>
-                                See exactly what is shared globally versus what changes per tenant at runtime.
-                              </CardDescription>
-                            </div>
-                            <Button variant="outline" size="sm" onClick={() => setActiveModal({ tenantId: tenant.tenantId, type: "stack" })}>
-                              Details
-                            </Button>
-                          </div>
+                          <CardTitle className="text-lg">Prompt behavior</CardTitle>
+                          <CardDescription>
+                            Blank fields inherit the shared prompt files, while saved tenant text overrides only the specific system or skill block.
+                          </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-3 text-sm text-[var(--widget-text-muted)]">
-                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Shared across all tenants: base system prompt, skills, output rules, complaint detection, and catalog retrieval logic.</CardContent></Card>
-                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Tenant-specific: merchant links, branding copy, business summary, voice, policies, extra instructions, and stage guidance.</CardContent></Card>
-                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Live runtime context: active catalog snapshot, cart, page context, browsing history, visitor profile, and location.</CardContent></Card>
+                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Shared across all tenants: the fallback [SYSTEM_PROMPT] base, shared skill markdown, output rules, complaint detection, and catalog logic.</CardContent></Card>
+                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Tenant-owned overrides: one full system prompt plus any skill prompts you explicitly save for this merchant.</CardContent></Card>
+                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Live runtime context still gets appended automatically: catalog snapshot, cart, page context, browsing history, visitor profile, and location.</CardContent></Card>
                         </CardContent>
                       </Card>
 
@@ -316,105 +360,99 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
       {selected ? (
         <>
           <ModalDialog
-            open={activeModal?.type === "stack"}
+            open={activeModal?.type === "prompts"}
             onOpenChange={(open) => setActiveModal(open ? activeModal : null)}
-            title={`${selected.tenant.name} prompt stack`}
-            description="How this tenant’s final model context is assembled on each chat turn."
+            title={`${selected.tenant.name} prompt editor`}
+            description="Edit merchant-owned prompt text directly. Leave any field blank to fall back to the shared default markdown file."
           >
-            <div className="space-y-4">
-              <FormSection value="shared" title="Shared prompt layers" description="Global files and runtime logic currently common to every tenant." defaultOpen>
-                <ul className="space-y-2 text-sm text-[var(--widget-text)]">
-                  <li>• Base system prompt from `SYSTEM_PROMPT.md`.</li>
-                  <li>• Stage skills from the shared `skills/*` files.</li>
-                  <li>• Output rules for proactive versus recommendation turns.</li>
-                  <li>• Complaint detection, stage selection, and catalog retrieval rules.</li>
-                </ul>
-              </FormSection>
-
-              <FormSection value="tenant" title="Tenant-specific injected blocks" description="Merchant-level knobs that layer on top of the shared skill set." defaultOpen>
-                <KeyValueList
-                  items={[
-                    { label: "Brand name", value: selected.tenant.prompt.brandName || selected.tenant.name },
-                    { label: "Website", value: selected.tenant.prompt.websiteUrl || selected.tenant.appUrl },
-                    { label: "Support URL", value: selected.tenant.prompt.supportUrl || "(not set)" },
-                    { label: "Store locator", value: selected.tenant.prompt.storeLocatorUrl || "(not set)" },
-                    { label: "Handoff", value: selected.tenant.prompt.handoffDescription || "(not set)" },
-                    { label: "Brand voice", value: selected.tenant.aiConfig.brandVoice || "(not set)" },
-                    { label: "Target audience", value: selected.tenant.aiConfig.targetAudience || "(not set)" },
-                    { label: "Extra instructions", value: selected.tenant.aiConfig.extraInstructions || "(not set)" },
-                  ]}
-                />
-              </FormSection>
-
-              <FormSection value="stages" title="Per-stage tenant tuning" description="Notes injected only when a given conversation stage is active." defaultOpen>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {stageGuidanceEntries(selected.tenant).map((entry) => (
-                    <MetricCard key={entry.label} label={entry.label} value={entry.value?.trim() || "Using shared default skill behavior."} />
-                  ))}
-                </div>
-              </FormSection>
-
-              <FormSection value="runtime" title="Runtime context" description="Live context always available when present at chat time.">
-                <ul className="space-y-2 text-sm text-[var(--widget-text)]">
-                  <li>• Active tenant catalog snapshot and accessory subset.</li>
-                  <li>• Current page context, cart state, and browsing history.</li>
-                  <li>• Visitor profile, prior purchases, and known preferences.</li>
-                  <li>• Optional customer location from request headers.</li>
-                </ul>
-              </FormSection>
-            </div>
-          </ModalDialog>
-
-          <ModalDialog
-            open={activeModal?.type === "tune"}
-            onOpenChange={(open) => setActiveModal(open ? activeModal : null)}
-            title={`${selected.tenant.name} tenant tuning`}
-            description="Edit the merchant-specific context blocks injected into the shared prompt stack."
-          >
-            <form action={`/api/admin/tenants/${selected.tenant.tenantId}`} method="post" className="space-y-4">
+            {promptDraft ? (
+              <form action={`/api/admin/tenants/${selected.tenant.tenantId}`} method="post" className="space-y-4">
               <FormSection value="basics" title="Store basics" description="Merchant naming and top-level app metadata." defaultOpen>
                 <FieldGrid>
-                  <Input name="name" defaultValue={selected.tenant.name} placeholder="Tenant name" />
-                  <Input name="appName" defaultValue={selected.tenant.appName} placeholder="App name" />
-                  <Input name="appUrl" defaultValue={selected.tenant.appUrl} placeholder="Primary website URL" className="md:col-span-2" />
+                  <Input name="name" value={promptDraft.name} onChange={(event) => setPromptDraft((current) => current ? { ...current, name: event.target.value } : current)} placeholder="Tenant name" />
+                  <Input name="appName" value={promptDraft.appName} onChange={(event) => setPromptDraft((current) => current ? { ...current, appName: event.target.value } : current)} placeholder="App name" />
+                  <Input name="appUrl" value={promptDraft.appUrl} onChange={(event) => setPromptDraft((current) => current ? { ...current, appUrl: event.target.value } : current)} placeholder="Primary website URL" className="md:col-span-2" />
                 </FieldGrid>
               </FormSection>
 
               <FormSection value="branding" title="Branding & handoff" description="Customer-facing copy and support/handoff links.">
                 <FieldGrid>
-                  <Input name="assistantName" defaultValue={selected.tenant.branding.assistantName || ""} placeholder="Assistant name" />
-                  <Input name="headerTitle" defaultValue={selected.tenant.branding.headerTitle || ""} placeholder="Header title" />
-                  <Input name="launcherLabel" defaultValue={selected.tenant.branding.launcherLabel || ""} placeholder="Launcher label" />
-                  <Input name="inputPlaceholder" defaultValue={selected.tenant.branding.inputPlaceholder || ""} placeholder="Input placeholder" />
-                  <Input name="supportUrl" defaultValue={selected.tenant.prompt.supportUrl || ""} placeholder="Support URL" />
-                  <Input name="storeLocatorUrl" defaultValue={selected.tenant.prompt.storeLocatorUrl || ""} placeholder="Store locator URL" />
-                  <Input name="handoffDescription" defaultValue={selected.tenant.prompt.handoffDescription || ""} placeholder="Human handoff description" className="md:col-span-2" />
+                  <Input name="assistantName" value={promptDraft.assistantName} onChange={(event) => setPromptDraft((current) => current ? { ...current, assistantName: event.target.value } : current)} placeholder="Assistant name" />
+                  <Input name="headerTitle" value={promptDraft.headerTitle} onChange={(event) => setPromptDraft((current) => current ? { ...current, headerTitle: event.target.value } : current)} placeholder="Header title" />
+                  <Input name="launcherLabel" value={promptDraft.launcherLabel} onChange={(event) => setPromptDraft((current) => current ? { ...current, launcherLabel: event.target.value } : current)} placeholder="Launcher label" />
+                  <Input name="inputPlaceholder" value={promptDraft.inputPlaceholder} onChange={(event) => setPromptDraft((current) => current ? { ...current, inputPlaceholder: event.target.value } : current)} placeholder="Input placeholder" />
+                  <Input name="supportUrl" value={promptDraft.supportUrl} onChange={(event) => setPromptDraft((current) => current ? { ...current, supportUrl: event.target.value } : current)} placeholder="Support URL" />
+                  <Input name="storeLocatorUrl" value={promptDraft.storeLocatorUrl} onChange={(event) => setPromptDraft((current) => current ? { ...current, storeLocatorUrl: event.target.value } : current)} placeholder="Store locator URL" />
+                  <Input name="handoffDescription" value={promptDraft.handoffDescription} onChange={(event) => setPromptDraft((current) => current ? { ...current, handoffDescription: event.target.value } : current)} placeholder="Human handoff description" className="md:col-span-2" />
                 </FieldGrid>
               </FormSection>
 
-              <FormSection value="core" title="Core AI guidance" description="Merchant-level context applied across all stages.">
-                <div className="grid gap-3">
-                  <Textarea name="businessSummary" defaultValue={selected.tenant.aiConfig.businessSummary || ""} placeholder="Business summary" />
-                  <FieldGrid>
-                    <Input name="brandVoice" defaultValue={selected.tenant.aiConfig.brandVoice || ""} placeholder="Brand voice" />
-                    <Input name="targetAudience" defaultValue={selected.tenant.aiConfig.targetAudience || ""} placeholder="Target audience" />
-                  </FieldGrid>
-                  <FieldGrid>
-                    <Textarea name="salesPolicy" defaultValue={selected.tenant.aiConfig.salesPolicy || ""} placeholder="Sales policy" />
-                    <Textarea name="supportPolicy" defaultValue={selected.tenant.aiConfig.supportPolicy || ""} placeholder="Support policy" />
-                  </FieldGrid>
-                  <Textarea name="extraInstructions" defaultValue={selected.tenant.aiConfig.extraInstructions || ""} placeholder="Extra merchant instructions" />
+              <FormSection value="system" title="System prompt" description="This replaces the shared system prompt for this tenant only when saved.">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-3 text-sm text-[var(--widget-text-muted)]" style={{ borderColor: "var(--widget-border)" }}>
+                    <span>{promptDraft.systemPrompt.trim() ? "Custom system prompt will be saved for this tenant." : "Blank means the shared default system prompt is used at runtime."}</span>
+                    <div className="flex gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, systemPrompt: DEFAULT_SYSTEM_PROMPT } : current)}>
+                        Load shared default
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, systemPrompt: "" } : current)}>
+                        Clear to fallback
+                      </Button>
+                    </div>
+                  </div>
+                  <Textarea name="systemPrompt" value={promptDraft.systemPrompt} onChange={(event) => setPromptDraft((current) => current ? { ...current, systemPrompt: event.target.value } : current)} className="min-h-[320px] font-mono text-xs leading-5" placeholder="Leave blank to use the shared SYSTEM_PROMPT.md fallback" />
                 </div>
               </FormSection>
 
-              <FormSection value="stages" title="Stage-specific tenant tuning" description="Per-tenant overrides appended only when that stage is active." defaultOpen>
+              <FormSection value="skills" title="Skill prompts" description="Each field overrides exactly one shared skill file for this tenant. Leave blank to inherit the shared fallback." defaultOpen>
                 <div className="grid gap-3">
-                  <Textarea name="discoveryGuidance" defaultValue={selected.tenant.aiConfig.discoveryGuidance || ""} placeholder="Discovery stage guidance" />
-                  <Textarea name="recommendationGuidance" defaultValue={selected.tenant.aiConfig.recommendationGuidance || ""} placeholder="Recommendation stage guidance" />
-                  <Textarea name="comparisonGuidance" defaultValue={selected.tenant.aiConfig.comparisonGuidance || ""} placeholder="Comparison stage guidance" />
-                  <Textarea name="closingGuidance" defaultValue={selected.tenant.aiConfig.closingGuidance || ""} placeholder="Closing / upsell stage guidance" />
-                  <Textarea name="proactiveGuidance" defaultValue={selected.tenant.aiConfig.proactiveGuidance || ""} placeholder="Proactive stage guidance" />
-                  <Textarea name="complaintGuidance" defaultValue={selected.tenant.aiConfig.complaintGuidance || ""} placeholder="Complaint stage guidance" />
+                  {PROMPT_STAGE_CONFIG.map(({ stage, label, description }) => {
+                    const currentValue = promptDraft.skillPrompts[stage];
+                    return (
+                      <Card key={stage} className="rounded-2xl border" style={{ borderColor: "var(--widget-border)" }}>
+                        <CardHeader className="pb-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <CardTitle className="text-base">{label}</CardTitle>
+                              <CardDescription>{description}</CardDescription>
+                            </div>
+                            <div className="flex gap-2">
+                              <Badge variant={currentValue.trim() ? "default" : "secondary"}>
+                                {currentValue.trim() ? "Custom" : "Shared default"}
+                              </Badge>
+                              <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, skillPrompts: { ...current.skillPrompts, [stage]: DEFAULT_SKILL_PROMPTS[stage] } } : current)}>
+                                Load default
+                              </Button>
+                              <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, skillPrompts: { ...current.skillPrompts, [stage]: "" } } : current)}>
+                                Clear
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <Textarea
+                            name={`skill:${stage}`}
+                            value={currentValue}
+                            onChange={(event) =>
+                              setPromptDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      skillPrompts: {
+                                        ...current.skillPrompts,
+                                        [stage]: event.target.value,
+                                      },
+                                    }
+                                  : current
+                              )
+                            }
+                            className="min-h-[220px] font-mono text-xs leading-5"
+                            placeholder={`Leave blank to use the shared ${stage}.md fallback`}
+                          />
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </div>
               </FormSection>
 
@@ -422,9 +460,10 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                 <DialogClose asChild>
                   <Button type="button" variant="outline">Cancel</Button>
                 </DialogClose>
-                <Button type="submit">Save tenant tuning</Button>
+                <Button type="submit">Save prompt configuration</Button>
               </DialogFooter>
             </form>
+            ) : null}
           </ModalDialog>
 
           <ModalDialog

@@ -20,6 +20,7 @@ import type {
   TenantPromptConfig,
   TenantRecord,
   TenantRuntimeConfig,
+  TenantSkillPrompts,
   TenantSessionAnalyticsFilters,
   TenantSessionAnalyticsPage,
   TenantSessionAnalyticsRecord,
@@ -52,6 +53,8 @@ const FALLBACK_TENANT: TenantRecord = {
     brandVoice: "Helpful, polished, and consultative.",
     targetAudience: "Shoppers comparing comfort, support, size, value, and product fit.",
   },
+  systemPrompt: null,
+  skillPrompts: {},
   allowedDomains: ["localhost", "127.0.0.1"],
   shopifyInstallation: null,
   createdAt: new Date(0).toISOString(),
@@ -67,8 +70,10 @@ interface TenantRow {
   app_url: string;
   theme_json: Partial<typeof DEFAULT_WIDGET_THEME>;
   branding_json: Partial<typeof DEFAULT_WIDGET_BRANDING>;
-  prompt_json: Partial<TenantPromptConfig>;
-  ai_config_json: Partial<TenantAiConfig>;
+  prompt_json: Record<string, unknown>;
+  ai_config_json: Record<string, unknown>;
+  system_prompt_text: string | null;
+  skill_prompts_json: TenantSkillPrompts;
   created_at: string;
   updated_at: string;
 }
@@ -269,6 +274,16 @@ function mapTenantRow(
   allowedDomains: string[],
   shopifyInstallation?: ShopifyInstallationRecord | null
 ): TenantRecord {
+  const prompt = {
+    brandName: row.name,
+    ...(row.prompt_json ?? {}),
+  } as TenantPromptConfig;
+
+  const aiConfig = {
+    ...defaultTenantAiConfig(row.name),
+    ...(row.ai_config_json ?? {}),
+  } as TenantAiConfig;
+
   return {
     tenantId: row.id,
     tenantKey: row.tenant_key,
@@ -278,14 +293,10 @@ function mapTenantRow(
     appUrl: row.app_url,
     theme: row.theme_json ?? {},
     branding: row.branding_json ?? {},
-    prompt: {
-      brandName: row.name,
-      ...row.prompt_json,
-    },
-    aiConfig: {
-      ...defaultTenantAiConfig(row.name),
-      ...(row.ai_config_json ?? {}),
-    },
+    prompt,
+    aiConfig,
+    systemPrompt: row.system_prompt_text,
+    skillPrompts: row.skill_prompts_json ?? {},
     allowedDomains,
     shopifyInstallation: shopifyInstallation ?? null,
     createdAt: row.created_at,
@@ -1111,6 +1122,8 @@ export async function bootstrapTenantSession(input: {
       branding: tenant.branding,
       prompt: tenant.prompt,
       aiConfig: tenant.aiConfig,
+      systemPrompt: tenant.systemPrompt,
+      skillPrompts: tenant.skillPrompts,
     },
     tenantToken: createTenantToken({
       tenantId: tenant.tenantId,
@@ -1149,6 +1162,8 @@ export async function resolveTenantFromToken(
     branding: tenant.branding,
     prompt: tenant.prompt,
     aiConfig: tenant.aiConfig,
+    systemPrompt: tenant.systemPrompt,
+    skillPrompts: tenant.skillPrompts,
   };
 }
 
@@ -1277,6 +1292,8 @@ export async function createTenant(input: {
   branding?: Record<string, unknown>;
   prompt?: Partial<TenantPromptConfig>;
   aiConfig?: Partial<TenantAiConfig>;
+  systemPrompt?: string | null;
+  skillPrompts?: TenantSkillPrompts;
 }): Promise<TenantRecord> {
   if (!hasDatabase()) {
     throw new Error("DATABASE_URL is required to create tenants.");
@@ -1297,8 +1314,8 @@ export async function createTenant(input: {
     try {
       await client.query(
         `INSERT INTO tenants (
-          id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, ai_config_json
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb)`,
+          id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, ai_config_json, system_prompt_text, skill_prompts_json
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12::jsonb)`,
         [
           tenantId,
           tenantKey,
@@ -1310,6 +1327,8 @@ export async function createTenant(input: {
           JSON.stringify(input.branding ?? {}),
           JSON.stringify(prompt),
           JSON.stringify({ ...defaultTenantAiConfig(input.name.trim()), ...(input.aiConfig ?? {}) }),
+          input.systemPrompt?.trim() || null,
+          JSON.stringify(input.skillPrompts ?? {}),
         ]
       );
       for (const hostname of domains) {
@@ -1349,6 +1368,8 @@ export async function updateTenantConfig(input: {
   branding?: Record<string, unknown>;
   prompt?: Partial<TenantPromptConfig>;
   aiConfig?: Partial<TenantAiConfig>;
+  systemPrompt?: string | null;
+  skillPrompts?: TenantSkillPrompts;
 }): Promise<void> {
   if (!hasDatabase()) throw new Error("DATABASE_URL is required to update tenant config.");
   await ensurePlatformSchema();
@@ -1368,6 +1389,8 @@ export async function updateTenantConfig(input: {
            branding_json = $6::jsonb,
            prompt_json = $7::jsonb,
            ai_config_json = $8::jsonb,
+           system_prompt_text = $9,
+           skill_prompts_json = $10::jsonb,
            updated_at = NOW()
        WHERE id = $1`,
       [
@@ -1387,6 +1410,8 @@ export async function updateTenantConfig(input: {
           ...(current.ai_config_json ?? {}),
           ...(input.aiConfig ?? {}),
         }),
+        input.systemPrompt === undefined ? current.system_prompt_text : input.systemPrompt?.trim() || null,
+        JSON.stringify(input.skillPrompts ?? current.skill_prompts_json ?? {}),
       ]
     );
   });
@@ -1472,8 +1497,8 @@ export async function upsertTenantFromShopifyInstall(input: {
 
         await client.query(
           `INSERT INTO tenants (
-            id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, ai_config_json
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb)`,
+            id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, ai_config_json, system_prompt_text, skill_prompts_json
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12::jsonb)`,
           [
             tenantId,
             tenantKey,
@@ -1485,6 +1510,8 @@ export async function upsertTenantFromShopifyInstall(input: {
             JSON.stringify({}),
             JSON.stringify(prompt),
             JSON.stringify(defaultTenantAiConfig(tenantName)),
+            null,
+            JSON.stringify({}),
           ]
         );
       } else {
@@ -1646,8 +1673,8 @@ export async function ensureTenantForShopifyStorefront(input: {
 
         await client.query(
           `INSERT INTO tenants (
-            id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, ai_config_json
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb)`,
+            id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, ai_config_json, system_prompt_text, skill_prompts_json
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12::jsonb)`,
           [
             tenantId,
             tenantKey,
@@ -1659,6 +1686,8 @@ export async function ensureTenantForShopifyStorefront(input: {
             JSON.stringify({}),
             JSON.stringify(prompt),
             JSON.stringify(defaultTenantAiConfig(tenantName)),
+            null,
+            JSON.stringify({}),
           ]
         );
       }

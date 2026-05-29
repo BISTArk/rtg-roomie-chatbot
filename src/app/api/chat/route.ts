@@ -437,11 +437,11 @@ export async function POST(request: Request) {
       console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, "returning", {
+        systemPrompt: tenant.systemPrompt,
+        skillPrompt: tenant.skillPrompts.returning,
         visitorProfile,
         pageContext: pageContext ?? undefined,
         customerLocation,
-        tenantPromptConfig: tenant.prompt,
-        tenantAiConfig: tenant.aiConfig,
       });
       // Include prior chat history (if any) so the AI can reference the
       // last topic. Always append a trigger message so the AI generates
@@ -488,11 +488,11 @@ export async function POST(request: Request) {
       console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, "reengagement", {
+        systemPrompt: tenant.systemPrompt,
+        skillPrompt: tenant.skillPrompts.reengagement,
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
-        tenantPromptConfig: tenant.prompt,
-        tenantAiConfig: tenant.aiConfig,
       });
       const sanitized = sanitizeForModel(messages, branding);
       const modelMessages = await convertToModelMessages(sanitized);
@@ -556,10 +556,10 @@ export async function POST(request: Request) {
         return createMissingCatalogResponse(messages);
       }
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, "contextual", {
+        systemPrompt: tenant.systemPrompt,
+        skillPrompt: tenant.skillPrompts.contextual,
         visitorProfile: visitorProfile ?? undefined,
         pageContext,
-        tenantPromptConfig: tenant.prompt,
-        tenantAiConfig: tenant.aiConfig,
       });
       const sanitized = sanitizeForModel(messages, branding);
       const modelMessages = await convertToModelMessages(sanitized);
@@ -603,11 +603,11 @@ export async function POST(request: Request) {
       console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, "new-session", {
+        systemPrompt: tenant.systemPrompt,
+        skillPrompt: tenant.skillPrompts["new-session"],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
-        tenantPromptConfig: tenant.prompt,
-        tenantAiConfig: tenant.aiConfig,
       });
       return buildTrackedStreamResponse({
         tenantId: tenant.tenantId,
@@ -648,12 +648,12 @@ export async function POST(request: Request) {
       console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, "interjection", {
+        systemPrompt: tenant.systemPrompt,
+        skillPrompt: tenant.skillPrompts.interjection,
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
         interjectionType,
-        tenantPromptConfig: tenant.prompt,
-        tenantAiConfig: tenant.aiConfig,
       });
       const sanitized = sanitizeForModel(messages, branding);
       const modelMessages = await convertToModelMessages(sanitized);
@@ -722,12 +722,12 @@ IMPORTANT context to weave in:
         return createMissingCatalogResponse(messages);
       }
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, "upsell", {
+        systemPrompt: tenant.systemPrompt,
+        skillPrompt: tenant.skillPrompts.upsell,
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
         accessoryData: retrieval.accessoryData,
-        tenantPromptConfig: tenant.prompt,
-        tenantAiConfig: tenant.aiConfig,
       });
       const sanitized = sanitizeForModel(messages, branding);
       const modelMessages = await convertToModelMessages(sanitized);
@@ -812,12 +812,12 @@ IMPORTANT context to weave in:
     }
 
     const systemPrompt = buildSystemPrompt(retrieval.catalogData, currentStage, {
+      systemPrompt: tenant.systemPrompt,
+      skillPrompt: tenant.skillPrompts[currentStage],
       visitorProfile: visitorProfile ?? undefined,
       pageContext: pageContext ?? undefined,
       customerLocation,
       accessoryData: retrieval.accessoryData,
-      tenantPromptConfig: tenant.prompt,
-      tenantAiConfig: tenant.aiConfig,
     });
 
       const sanitized = sanitizeForModel(messages, branding);

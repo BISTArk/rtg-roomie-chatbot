@@ -1,6 +1,5 @@
 import { SYSTEM_PROMPT_RAW } from "@/data/system-prompt-raw";
 import { SKILLS } from "@/data/skills-raw";
-import type { TenantAiConfig, TenantPromptConfig } from "@/lib/platform-types";
 
 export type ConversationStage =
   | "returning"
@@ -84,72 +83,12 @@ function loadFile(relativePath: string): string {
   throw new Error(`[system-prompt] Unknown file: ${relativePath}`);
 }
 
-function applyTenantPromptConfig(
-  content: string,
-  config?: TenantPromptConfig
-): string {
-  const brandName = config?.brandName?.trim() || "the merchant";
-  return content.replaceAll("{{BRAND_NAME}}", brandName);
+export function getDefaultSystemPrompt(): string {
+  return loadFile("SYSTEM_PROMPT.md");
 }
 
-function buildTenantPromptConfigBlock(config?: TenantPromptConfig): string {
-  const brandName = config?.brandName?.trim() || "the merchant";
-  const lines = [
-    `- Brand name: ${brandName}`,
-    config?.websiteUrl?.trim() ? `- Website URL: ${config.websiteUrl.trim()}` : null,
-    config?.supportUrl?.trim() ? `- Support URL: ${config.supportUrl.trim()}` : null,
-    config?.storeLocatorUrl?.trim() ? `- Store locator URL: ${config.storeLocatorUrl.trim()}` : null,
-    config?.handoffDescription?.trim() ? `- Human handoff team: ${config.handoffDescription.trim()}` : null,
-  ].filter(Boolean) as string[];
-
-  return `\n\n---\n\n# MERCHANT PROMPT CONFIG\n\nUse the merchant-specific details below whenever you reference the merchant, link to support, mention store visits, or describe human handoff options:\n${lines.join("\n")}`;
-}
-
-function buildTenantAiConfigBlock(
-  config: TenantAiConfig | undefined,
-  stage: ConversationStage
-): string {
-  if (!config) return "";
-
-  const globalLines = [
-    config.businessSummary ? `- Business summary: ${config.businessSummary}` : null,
-    config.brandVoice ? `- Brand voice: ${config.brandVoice}` : null,
-    config.targetAudience ? `- Target audience: ${config.targetAudience}` : null,
-    config.salesPolicy ? `- Sales policy: ${config.salesPolicy}` : null,
-    config.supportPolicy ? `- Support policy: ${config.supportPolicy}` : null,
-    config.extraInstructions ? `- Extra merchant instructions: ${config.extraInstructions}` : null,
-  ].filter(Boolean) as string[];
-
-  const stageGuidance =
-    stage === "discovery"
-      ? config.discoveryGuidance
-      : stage === "recommendation"
-        ? config.recommendationGuidance
-        : stage === "comparison"
-          ? config.comparisonGuidance
-          : stage === "closing" || stage === "upsell"
-            ? config.closingGuidance
-            : stage === "complaint"
-              ? config.complaintGuidance
-              : config.proactiveGuidance;
-
-  const sections: string[] = [];
-  if (globalLines.length > 0) {
-    sections.push(
-      "Use the merchant-specific guidance below to adapt your tone, recommendations, and boundaries for this store:",
-      globalLines.join("\n")
-    );
-  }
-
-  if (stageGuidance?.trim()) {
-    sections.push(
-      `Stage-specific guidance for ${stage}:`,
-      `- ${stageGuidance.trim()}`
-    );
-  }
-
-  if (sections.length === 0) return "";
-  return `\n\n---\n\n# TENANT AI CONFIG\n\n${sections.join("\n\n")}`;
+export function getDefaultSkillPrompt(stage: ConversationStage): string {
+  return loadFile(`skills/${stage}.md`);
 }
 
 /**
@@ -467,26 +406,23 @@ export function buildSystemPrompt(
   catalogData: string,
   stage: ConversationStage,
   options?: {
+    systemPrompt?: string | null;
+    skillPrompt?: string | null;
     pageContext?: PageContext;
     visitorProfile?: VisitorProfile;
     accessoryData?: string;
     interjectionType?: string;
     customerLocation?: CustomerLocation;
-    tenantPromptConfig?: TenantPromptConfig;
-    tenantAiConfig?: TenantAiConfig;
   }
 ): string {
   // Load universal rules
-  const base = applyTenantPromptConfig(loadFile("SYSTEM_PROMPT.md"), options?.tenantPromptConfig).replace(
+  const base = (options?.systemPrompt?.trim() || getDefaultSystemPrompt()).replace(
     "{{CATALOG_DATA}}",
     catalogData
   );
 
   // Load stage-specific skill
-  const skill = applyTenantPromptConfig(
-    loadFile(`skills/${stage}.md`),
-    options?.tenantPromptConfig
-  );
+  const skill = options?.skillPrompt?.trim() || getDefaultSkillPrompt(stage);
 
   // Build human-readable context (always included when available)
   const contextNarrative = buildContextNarrative(
@@ -526,9 +462,7 @@ export function buildSystemPrompt(
     : HTML_INSTRUCTIONS;
 
   const locationBlock = buildCustomerLocationBlock(options?.customerLocation);
-  const tenantPromptConfigBlock = buildTenantPromptConfigBlock(options?.tenantPromptConfig);
-  const tenantAiConfigBlock = buildTenantAiConfigBlock(options?.tenantAiConfig, stage);
 
   // Combine: universal rules + current stage skill + context + accessory data + location + stage-appropriate output rules
-  return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}${tenantPromptConfigBlock}${tenantAiConfigBlock}\n\n---\n\n${outputRules}`;
+  return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}\n\n---\n\n${outputRules}`;
 }
