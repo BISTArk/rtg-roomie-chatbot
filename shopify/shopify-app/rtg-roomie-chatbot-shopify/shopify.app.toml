@@ -1,8 +1,8 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-# Main / future public Shopify app config.
-client_id = "490e0122985fe1b9a296741745025ff2"
-application_url = "https://rtg-roomie-chatbot-jy3i.vercel.app"
+# Discount Mattress Shopify app config.
+client_id = "14d24a16586b68797e8df536ff9852e9"
+application_url = "https://ai-shop-assist-discount-mattress.vercel.app"
 embedded = true
 name = "Shop Assist"
 
@@ -14,7 +14,7 @@ scopes = "read_products"
 api_version = "2026-07"
 
 [auth]
-redirect_urls = [ "https://rtg-roomie-chatbot-jy3i.vercel.app/api/shopify/callback" ]
+redirect_urls = [ "https://ai-shop-assist-discount-mattress.vercel.app/api/shopify/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true

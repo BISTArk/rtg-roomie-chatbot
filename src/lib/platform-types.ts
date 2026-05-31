@@ -20,21 +20,6 @@ export type TenantPromptStage =
 
 export type TenantSkillPrompts = Partial<Record<TenantPromptStage, string>>;
 
-export interface TenantAiConfig {
-  businessSummary?: string;
-  brandVoice?: string;
-  targetAudience?: string;
-  salesPolicy?: string;
-  supportPolicy?: string;
-  extraInstructions?: string;
-  discoveryGuidance?: string;
-  recommendationGuidance?: string;
-  comparisonGuidance?: string;
-  closingGuidance?: string;
-  proactiveGuidance?: string;
-  complaintGuidance?: string;
-}
-
 export type ShopifyInstallStatus = "pending" | "installed" | "uninstalled";
 
 export interface ShopifyInstallationRecord {
@@ -72,7 +57,6 @@ export interface TenantRuntimeConfig {
   theme: Partial<WidgetTheme>;
   branding: Partial<WidgetBranding>;
   prompt: TenantPromptConfig;
-  aiConfig: TenantAiConfig;
   systemPrompt: string | null;
   skillPrompts: TenantSkillPrompts;
 }
@@ -172,6 +156,7 @@ export interface TenantSessionAnalyticsRecord {
 export interface TenantSessionAnalyticsFilters extends TenantAnalyticsFilters {
   query?: string | null;
   errorsOnly?: boolean;
+  engagedOnly?: boolean;
   limit?: number;
   offset?: number;
 }

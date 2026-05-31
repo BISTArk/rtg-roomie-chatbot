@@ -87,6 +87,10 @@ const DEFAULT_SKILL_PROMPTS = Object.fromEntries(
   PROMPT_STAGE_CONFIG.map(({ stage }) => [stage, getDefaultSkillPrompt(stage)])
 ) as Record<TenantPromptStage, string>;
 
+function arePromptsEquivalent(left: string | null | undefined, right: string | null | undefined): boolean {
+  return (left || "").trim() === (right || "").trim();
+}
+
 function getShopifyConnectDomain(domains: string[]): string {
   return domains.find((domain) => domain.endsWith(".myshopify.com")) || "";
 }
@@ -100,7 +104,22 @@ function formatDateTime(value: string): string {
 }
 
 function configuredSkillPromptCount(tenant: TenantRecord): number {
-  return PROMPT_STAGE_CONFIG.filter(({ stage }) => tenant.skillPrompts[stage]?.trim()).length;
+  return PROMPT_STAGE_CONFIG.filter(({ stage }) => {
+    const prompt = tenant.skillPrompts[stage];
+    return Boolean(prompt?.trim()) && !arePromptsEquivalent(prompt, DEFAULT_SKILL_PROMPTS[stage]);
+  }).length;
+}
+
+function getSystemPromptStatus(tenant: TenantRecord): string {
+  if (!tenant.systemPrompt?.trim()) return "Using file fallback";
+  return arePromptsEquivalent(tenant.systemPrompt, DEFAULT_SYSTEM_PROMPT)
+    ? "Default prompt stored in DB"
+    : "Custom prompt saved";
+}
+
+function getSkillPromptStatus(value: string, stage: TenantPromptStage): "fallback" | "seeded" | "custom" {
+  if (!value.trim()) return "fallback";
+  return arePromptsEquivalent(value, DEFAULT_SKILL_PROMPTS[stage]) ? "seeded" : "custom";
 }
 
 function buildPromptEditorDraft(tenant: TenantRecord): PromptEditorDraft {
@@ -228,7 +247,7 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
               const shopifyConnectDomain = getShopifyConnectDomain(tenant.allowedDomains);
               const configuredSkillPrompts = configuredSkillPromptCount(tenant);
               const isShopifyConnected = Boolean(tenant.shopifyInstallation);
-              const systemPromptStatus = tenant.systemPrompt?.trim() ? "Custom prompt saved" : "Using shared default";
+              const systemPromptStatus = getSystemPromptStatus(tenant);
 
               return (
                 <AccordionItem
@@ -254,14 +273,14 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                           <Badge variant="outline">{tenant.allowedDomains.length} domains</Badge>
                           <Badge variant="outline">{versions.length} catalog versions</Badge>
                           <Badge variant="outline">{debug.conversations.length} saved sessions</Badge>
-                          <Badge variant="outline">{configuredSkillPrompts} skill overrides</Badge>
+                          <Badge variant="outline">{configuredSkillPrompts} custom skill prompts</Badge>
                         </div>
                       </div>
                       <div className="grid min-w-[240px] grid-cols-1 gap-3 sm:grid-cols-2">
                         <MetricCard label="System prompt" value={systemPromptStatus} />
                         <MetricCard
                           label="Skills"
-                          value={configuredSkillPrompts > 0 ? `${configuredSkillPrompts} custom skills` : "All skills on shared defaults"}
+                          value={configuredSkillPrompts > 0 ? `${configuredSkillPrompts} custom skills` : "Default skills stored in DB"}
                         />
                       </div>
                     </div>
@@ -275,7 +294,7 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                             <div>
                               <CardTitle className="text-lg">Prompt editor</CardTitle>
                               <CardDescription>
-                                Edit the full tenant system prompt and any stage skill prompts directly, with shared markdown files as fallback when left blank.
+                                Edit the tenant-owned base prompt, launcher button copy, and stage skill prompts, with file-based fallback still available when fields are blank.
                               </CardDescription>
                             </div>
                             <Button
@@ -293,12 +312,12 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                           <MetricCard label="System prompt" value={systemPromptStatus} />
                           <MetricCard
                             label="Skill prompt coverage"
-                            value={configuredSkillPrompts > 0 ? `${configuredSkillPrompts} tenant-owned skill prompts` : "No custom skills yet"}
+                            value={configuredSkillPrompts > 0 ? `${configuredSkillPrompts} custom tenant skills` : "Using seeded DB defaults"}
                           />
                           <div className="flex flex-wrap gap-2">
                             {PROMPT_STAGE_CONFIG.map(({ stage, label }) => (
-                              <Badge key={stage} variant={tenant.skillPrompts[stage]?.trim() ? "default" : "secondary"}>
-                                {label} {tenant.skillPrompts[stage]?.trim() ? "custom" : "default"}
+                              <Badge key={stage} variant={getSkillPromptStatus(tenant.skillPrompts[stage] || "", stage) === "custom" ? "default" : "secondary"}>
+                                {label} {getSkillPromptStatus(tenant.skillPrompts[stage] || "", stage) === "custom" ? "custom" : getSkillPromptStatus(tenant.skillPrompts[stage] || "", stage) === "seeded" ? "seeded" : "fallback"}
                               </Badge>
                             ))}
                           </div>
@@ -309,12 +328,12 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                         <CardHeader className="pb-4">
                           <CardTitle className="text-lg">Prompt behavior</CardTitle>
                           <CardDescription>
-                            Blank fields inherit the shared prompt files, while saved tenant text overrides only the specific system or skill block.
+                            Each tenant now owns a DB-backed base prompt and skill set. Blank fields still fall back to the shared prompt files at runtime.
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-3 text-sm text-[var(--widget-text-muted)]">
-                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Shared across all tenants: the fallback [SYSTEM_PROMPT] base, shared skill markdown, output rules, complaint detection, and catalog logic.</CardContent></Card>
-                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Tenant-owned overrides: one full system prompt plus any skill prompts you explicitly save for this merchant.</CardContent></Card>
+                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Seeded into each tenant DB record: the current default base prompt plus one prompt for every skill/stage.</CardContent></Card>
+                          <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">File-based prompts still act as backup when you intentionally clear a field to fallback.</CardContent></Card>
                           <Card className="rounded-2xl bg-[color:color-mix(in_srgb,var(--widget-surface)_88%,white_12%)]"><CardContent className="p-4">Live runtime context still gets appended automatically: catalog snapshot, cart, page context, browsing history, visitor profile, and location.</CardContent></Card>
                         </CardContent>
                       </Card>
@@ -363,7 +382,7 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
             open={activeModal?.type === "prompts"}
             onOpenChange={(open) => setActiveModal(open ? activeModal : null)}
             title={`${selected.tenant.name} prompt editor`}
-            description="Edit merchant-owned prompt text directly. Leave any field blank to fall back to the shared default markdown file."
+            description="Edit tenant-owned prompt text and widget button copy directly. Leave any field blank to fall back to the shared default markdown file."
           >
             {promptDraft ? (
               <form action={`/api/admin/tenants/${selected.tenant.tenantId}`} method="post" className="space-y-4">
@@ -390,10 +409,10 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
               <FormSection value="system" title="System prompt" description="This replaces the shared system prompt for this tenant only when saved.">
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-3 text-sm text-[var(--widget-text-muted)]" style={{ borderColor: "var(--widget-border)" }}>
-                    <span>{promptDraft.systemPrompt.trim() ? "Custom system prompt will be saved for this tenant." : "Blank means the shared default system prompt is used at runtime."}</span>
+                    <span>{!promptDraft.systemPrompt.trim() ? "Blank means the shared default system prompt is used at runtime." : arePromptsEquivalent(promptDraft.systemPrompt, DEFAULT_SYSTEM_PROMPT) ? "This tenant currently stores the seeded default system prompt in DB." : "Custom system prompt will be saved for this tenant."}</span>
                     <div className="flex gap-2">
                       <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, systemPrompt: DEFAULT_SYSTEM_PROMPT } : current)}>
-                        Load shared default
+                        Load default
                       </Button>
                       <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, systemPrompt: "" } : current)}>
                         Clear to fallback
@@ -408,6 +427,7 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                 <div className="grid gap-3">
                   {PROMPT_STAGE_CONFIG.map(({ stage, label, description }) => {
                     const currentValue = promptDraft.skillPrompts[stage];
+                    const status = getSkillPromptStatus(currentValue, stage);
                     return (
                       <Card key={stage} className="rounded-2xl border" style={{ borderColor: "var(--widget-border)" }}>
                         <CardHeader className="pb-3">
@@ -417,8 +437,8 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                               <CardDescription>{description}</CardDescription>
                             </div>
                             <div className="flex gap-2">
-                              <Badge variant={currentValue.trim() ? "default" : "secondary"}>
-                                {currentValue.trim() ? "Custom" : "Shared default"}
+                              <Badge variant={status === "custom" ? "default" : "secondary"}>
+                                {status === "custom" ? "Custom" : status === "seeded" ? "Seeded default" : "File fallback"}
                               </Badge>
                               <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, skillPrompts: { ...current.skillPrompts, [stage]: DEFAULT_SKILL_PROMPTS[stage] } } : current)}>
                                 Load default

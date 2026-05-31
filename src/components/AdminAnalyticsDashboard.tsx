@@ -59,6 +59,7 @@ export default function AdminAnalyticsDashboard({
     toDate: string;
     query: string;
     errorsOnly: boolean;
+    engagedOnly: boolean;
     limit: number;
     page: number;
   };
@@ -101,6 +102,7 @@ export default function AdminAnalyticsDashboard({
       to: filters.toDate,
       q: filters.query,
       errors: filters.errorsOnly ? "1" : "",
+      engaged: filters.engagedOnly ? "1" : "",
       limit: String(filters.limit),
       page: String(filters.page),
       ...overrides,
@@ -127,6 +129,14 @@ export default function AdminAnalyticsDashboard({
 
   const outlineLinkClass =
     "inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition-colors";
+  const buildExportHref = (format: "csv" | "xlsx", engagedOnly: boolean) =>
+    buildHref({
+      tab: undefined,
+      page: undefined,
+      limit: undefined,
+      engaged: engagedOnly ? "1" : "",
+      format,
+    }).replace("/admin/analytics", "/api/admin/analytics/export");
 
   return (
     <>
@@ -206,6 +216,11 @@ export default function AdminAnalyticsDashboard({
             <label className="inline-flex items-center gap-2 text-sm text-[var(--widget-text)]">
               <input type="checkbox" name="errors" value="1" defaultChecked={filters.errorsOnly} />
               Errors only
+            </label>
+
+            <label className="inline-flex items-center gap-2 text-sm text-[var(--widget-text)]">
+              <input type="checkbox" name="engaged" value="1" defaultChecked={filters.engagedOnly} />
+              Engaged only
             </label>
 
             <label className="inline-flex items-center gap-2 text-sm text-[var(--widget-text)]">
@@ -305,9 +320,43 @@ export default function AdminAnalyticsDashboard({
         {activeTab === "sessions" ? (
         <div className="overflow-hidden rounded-2xl border" style={{ borderColor: "var(--widget-border)" }}>
           <div className="border-b px-4 py-3" style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface-alt)" }}>
-            <div className="text-sm font-semibold text-[var(--widget-text)]">Recent Sessions</div>
-            <div className="mt-1 text-xs text-[var(--widget-text-muted)]">
-              Showing {formatCount(startRow)}-{formatCount(endRow)} of {formatCount(sessionPage.totalCount)} server-filtered sessions.
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-[var(--widget-text)]">Recent Sessions</div>
+                <div className="mt-1 text-xs text-[var(--widget-text-muted)]">
+                  Showing {formatCount(startRow)}-{formatCount(endRow)} of {formatCount(sessionPage.totalCount)} server-filtered sessions.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={buildExportHref("csv", false)}
+                  className={outlineLinkClass}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Export all CSV
+                </Link>
+                <Link
+                  href={buildExportHref("xlsx", false)}
+                  className={outlineLinkClass}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Export all Excel
+                </Link>
+                <Link
+                  href={buildExportHref("csv", true)}
+                  className={outlineLinkClass}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Export engaged CSV
+                </Link>
+                <Link
+                  href={buildExportHref("xlsx", true)}
+                  className={outlineLinkClass}
+                  style={{ borderColor: "var(--widget-border)", background: "var(--widget-surface)", color: "var(--widget-text)" }}
+                >
+                  Export engaged Excel
+                </Link>
+              </div>
             </div>
           </div>
           <div className="overflow-x-auto">

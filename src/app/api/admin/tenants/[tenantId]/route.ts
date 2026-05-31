@@ -22,6 +22,10 @@ function readOptionalText(formData: FormData, name: string): string | undefined 
   return value || undefined;
 }
 
+function readPromptText(formData: FormData, name: string): string {
+  return String(formData.get(name) || "").trim();
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ tenantId: string }> }
@@ -33,10 +37,7 @@ export async function POST(
   const { tenantId } = await params;
   const formData = await request.formData();
   const skillPrompts = PROMPT_STAGES.reduce<TenantSkillPrompts>((accumulator, stage) => {
-    const value = readOptionalText(formData, `skill:${stage}`);
-    if (value) {
-      accumulator[stage] = value;
-    }
+    accumulator[stage] = readPromptText(formData, `skill:${stage}`);
     return accumulator;
   }, {});
 

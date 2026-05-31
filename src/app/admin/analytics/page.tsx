@@ -51,6 +51,7 @@ export default async function AdminAnalyticsPage({
   const toDate = readString(params.to);
   const query = readString(params.q).trim();
   const errorsOnly = readString(params.errors) === "1";
+  const engagedOnly = readString(params.engaged) === "1";
   const limit = clampLimit(readString(params.limit));
   const page = clampPage(readString(params.page));
   const requestedTenantIds = readArray(params.tenant);
@@ -88,6 +89,7 @@ export default async function AdminAnalyticsPage({
         ...baseFilters,
         query: activeTab === "sessions" ? query : undefined,
         errorsOnly: activeTab === "sessions" ? errorsOnly : false,
+        engagedOnly: activeTab === "sessions" ? engagedOnly : false,
         limit,
         offset: (page - 1) * limit,
       }),
@@ -145,6 +147,7 @@ export default async function AdminAnalyticsPage({
             toDate,
             query,
             errorsOnly,
+            engagedOnly,
             limit,
             page,
           }}
