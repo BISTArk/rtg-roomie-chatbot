@@ -96,11 +96,11 @@ function buildCsv(rows: ExportRow[]): string {
   return lines.join("\n");
 }
 
-function buildWorkbook(rows: ExportRow[]): Uint8Array {
+function buildWorkbook(rows: ExportRow[]): ArrayBuffer {
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Sessions");
-  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Uint8Array;
+  return XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
 }
 
 function buildFilename(format: "csv" | "xlsx", engagedOnly: boolean): string {
@@ -158,18 +158,13 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return new Response(
-      new Blob([buildWorkbook(rows)], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-      {
+    return new Response(buildWorkbook(rows), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
       },
-      }
-    );
+    });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Failed to export analytics sessions." },
