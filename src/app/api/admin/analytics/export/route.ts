@@ -158,13 +158,18 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return new Response(buildWorkbook(rows), {
+    return new Response(
+      new Blob([buildWorkbook(rows)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
       },
-    });
+      }
+    );
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Failed to export analytics sessions." },
