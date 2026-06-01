@@ -1,3 +1,4 @@
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { bootstrapTenantSession } from "@/lib/tenant-platform";
 import type { PersistedChatMessage } from "@/lib/chat-types";
 import type { VisitorProfile } from "@/lib/visitor-profile";
@@ -13,6 +14,7 @@ type BootstrapRequestBody = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as BootstrapRequestBody;
+    const adminAuthenticated = await isAdminAuthenticated();
     if (!body.sessionId || !body.tenantKey) {
       return Response.json(
         { error: "tenantKey and sessionId are required." },
@@ -26,6 +28,7 @@ export async function POST(request: Request) {
       hostOrigin: body.hostOrigin,
       localMessages: body.localMessages,
       localProfile: body.localProfile,
+      skipHostValidation: adminAuthenticated,
     });
 
     return Response.json(bootstrap);

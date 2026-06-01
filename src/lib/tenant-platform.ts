@@ -648,16 +648,75 @@ function hostAllowed(hostname: string, allowedDomains: string[]): boolean {
   });
 }
 
+function buildOriginFromHostname(hostname: string): string {
+  const normalizedHostname = String(hostname || "").trim().toLowerCase();
+  if (!normalizedHostname || normalizedHostname.startsWith("*.")) return "";
+  const useHttp =
+    normalizedHostname === "localhost" ||
+    /^(?:\d{1,3}\.){3}\d{1,3}$/.test(normalizedHostname);
+  return `${useHttp ? "http" : "https"}://${normalizedHostname}`;
+}
+
+function resolveTenantTokenHostOrigin(
+  tenant: Pick<TenantRecord, "allowedDomains" | "appUrl">,
+  requestedHostOrigin?: string | null
+): string {
+  const requestedOrigin = normalizeOrigin(requestedHostOrigin);
+  const requestedHostname = normalizeHostname(requestedOrigin);
+
+  if (
+    requestedOrigin &&
+    requestedHostname &&
+    (
+      tenant.allowedDomains.length === 0 ||
+      hostAllowed(requestedHostname, tenant.allowedDomains)
+    )
+  ) {
+    return requestedOrigin;
+  }
+
+  const appOrigin = normalizeOrigin(tenant.appUrl);
+  const appHostname = normalizeHostname(appOrigin);
+  if (
+    appOrigin &&
+    appHostname &&
+    (
+      tenant.allowedDomains.length === 0 ||
+      hostAllowed(appHostname, tenant.allowedDomains)
+    )
+  ) {
+    return appOrigin;
+  }
+
+  for (const domain of tenant.allowedDomains) {
+    const allowedOrigin = normalizeOrigin(buildOriginFromHostname(domain));
+    if (allowedOrigin) {
+      return allowedOrigin;
+    }
+  }
+
+  return requestedOrigin || appOrigin || tenant.appUrl;
+}
+
 export async function resolveTenant(
   tenantKey: string | null | undefined,
-  hostOrigin?: string | null
+  hostOrigin?: string | null,
+  options?: {
+    skipHostValidation?: boolean;
+  }
 ): Promise<TenantRecord> {
   const normalizedKey = String(tenantKey || DEFAULT_TENANT_KEY).trim() || DEFAULT_TENANT_KEY;
   const origin = normalizeOrigin(hostOrigin);
   const hostname = normalizeHostname(origin);
+  const skipHostValidation = options?.skipHostValidation === true;
 
   if (!hasDatabase()) {
-    if (hostname && !hostAllowed(hostname, FALLBACK_TENANT.allowedDomains) && hostname !== normalizeHostname(FALLBACK_TENANT.appUrl)) {
+    if (
+      !skipHostValidation &&
+      hostname &&
+      !hostAllowed(hostname, FALLBACK_TENANT.allowedDomains) &&
+      hostname !== normalizeHostname(FALLBACK_TENANT.appUrl)
+    ) {
       throw new Error(`Tenant "${normalizedKey}" is not allowed for host "${hostname}".`);
     }
     return {
@@ -679,7 +738,12 @@ export async function resolveTenant(
 
     const row = result.rows[0];
     const allowedDomains = await loadTenantDomains(client, row.id);
-    if (hostname && allowedDomains.length > 0 && !hostAllowed(hostname, allowedDomains)) {
+    if (
+      !skipHostValidation &&
+      hostname &&
+      allowedDomains.length > 0 &&
+      !hostAllowed(hostname, allowedDomains)
+    ) {
       throw new Error(`Tenant "${normalizedKey}" is not allowed for host "${hostname}".`);
     }
 
@@ -1267,8 +1331,11 @@ export async function bootstrapTenantSession(input: {
   hostOrigin?: string | null;
   localMessages?: PersistedChatMessage[] | null;
   localProfile?: VisitorProfile | null;
+  skipHostValidation?: boolean;
 }): Promise<TenantBootstrap> {
-  const tenant = await resolveTenant(input.tenantKey, input.hostOrigin);
+  const tenant = await resolveTenant(input.tenantKey, input.hostOrigin, {
+    skipHostValidation: input.skipHostValidation,
+  });
   const persisted = await loadSessionState(tenant.tenantId, input.sessionId);
   const localMessages = sanitizeMessages(input.localMessages);
   const localProfile = sanitizeProfile(input.localProfile);
@@ -1302,7 +1369,7 @@ export async function bootstrapTenantSession(input: {
     tenantToken: createTenantToken({
       tenantId: tenant.tenantId,
       tenantKey: tenant.tenantKey,
-      hostOrigin: normalizeOrigin(input.hostOrigin) || tenant.appUrl,
+      hostOrigin: resolveTenantTokenHostOrigin(tenant, input.hostOrigin),
     }),
     session: {
       sessionId: input.sessionId,
