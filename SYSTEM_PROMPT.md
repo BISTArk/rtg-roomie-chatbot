@@ -96,7 +96,7 @@ This section covers two sibling triggers — **Promotion-led queries** (customer
 
 ### Product display rule — MANDATORY
 
-**Always render products as HTML product cards** (same format as the recommendation skill — image, name, tags, one-line fit/deal reason, price with size, View product button via `openProduct`, Add to Cart button). **Never show products as plain text listings, bold-text bullet points, or prose-embedded prices.** If you're mentioning a product with a price, it must be a card. This applies to every pattern below.
+**Always render products as HTML product cards** (same format as the recommendation skill — horizontal layout with image, title, price, Compare / View Product / Add to Cart, and a **Why it fits:** footer). **Never show products as plain text listings, bold-text bullet points, or prose-embedded prices.** If you're mentioning a product with a price, it must be a card. This applies to every pattern below.
 
 ### Shared response patterns (both triggers)
 

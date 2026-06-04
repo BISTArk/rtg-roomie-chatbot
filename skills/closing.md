@@ -81,20 +81,7 @@ Then immediately show the first category card.
 
 For each accessory, show one recommended product card. Use real data from the ACCESSORY CATALOG — exact name, price, image URL, product link. Never invent accessories.
 
-```html
-<div class="card">
-<div class="card-media">
-<img class="card-image" src="IMAGE_URL" alt="PRODUCT_NAME" loading="lazy" />
-</div>
-<div class="card-title">PRODUCT_NAME</div>
-<p style="margin:6px 0;font-size:13px">WHY_THIS_FOR_THEM (1 sentence tied to their stated needs)</p>
-<div class="card-price">$PRICE</div>
-<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-<button type="button" class="btn-primary" onclick="sendPrompt('Add PRODUCT_NAME to cart')">🛒 Add to cart</button>
-<button type="button" class="btn-secondary" onclick="sendPrompt('Show me more CATEGORY_NAME options')">See more options</button>
-</div>
-</div>
-```
+Use the standard product card layout from the universal prompt (image + wishlist, title, price, Compare / View Product / Add to Cart, **Why it fits:** footer). For accessories, put WHY_THIS_FOR_THEM in the footer. Add to cart must use addToCart(VARIANT_ID) when the catalog row has a Shopify Variant ID.
 
 Replace CATEGORY_NAME with the category (e.g. "pillow", "protector").
 

@@ -267,10 +267,31 @@ These JavaScript helpers are pre-loaded:
 - checkout() — **Shopify storefront embed only.** Sends the customer to the host store's checkout (\`/checkout\`).
 - toggleSelect(element, value) — toggles a pill on/off for multi-select
 - submitSelected(prefix) — sends all toggled values as one message
+- toggleWishlist(button) — toggles the wishlist heart on a product card
 
-Pre-loaded CSS classes: .pill, .chip, .card, .card-title, .card-media, .card-image, .card-price, .card-tag, .tag-premium, .tag-value, .tag-cooling, .btn-primary, .btn-secondary, .btn-submit, .grid-2, .flex-wrap
+Pre-loaded CSS classes: .pill, .chip, .card, .card-top, .card-main, .card-footer, .card-title, .card-media, .card-image, .card-price, .card-actions-row, .card-buttons, .card-wishlist-btn, .btn-outline, .btn-cart, .btn-primary, .btn-secondary, .btn-submit, .grid-2, .flex-wrap
 
 Pre-loaded JavaScript: sendPrompt, toggleSelect, submitSelected, **openProduct(url, productName)** — use openProduct for real product page URLs from the catalog. ALWAYS pass the product name as the second argument for tracking.
+
+### Discovery Questions Use The Tool
+
+For discovery or guided-selling questions, do NOT render HTML pills or submit buttons.
+Call the \`ask_user_question\` tool instead.
+
+- Put the full discovery step in one tool call.
+- Ask 1 to 3 questions total in that tool call.
+- Each question needs a short \`header\`, the shopper-facing \`question\`, and 2 to 4 \`options\`.
+- Set \`multiSelect: true\` only when the shopper should be able to pick more than one option for that question.
+- After the tool returns answers, continue naturally and move toward recommendations.
+
+### Product Comparison Uses The Tool
+
+When the shopper wants to compare 2 to 4 specific products, call the \`compare_tool\`.
+
+- Pass the exact shortlisted products you are comparing.
+- Include a short \`shopperGoal\` tied to what matters to them.
+- Include a \`recommendation\` when one option is clearly the best fit.
+- The tool UI renders the side-by-side comparison, so keep surrounding prose brief and do not recreate the table in markdown.
 
 ### ABSOLUTE RULE: Product Cards
 
@@ -286,26 +307,35 @@ Product card format (replace placeholders with real values from that product's c
 
 THREE_BACKTICKS_html
 <div class="card">
+<div class="card-top">
 <div class="card-media" onclick='openProduct("PASTE_PRODUCT_LINK_URL_HERE", "PRODUCT NAME")' title="View product details">
 <img class="card-image" src="PASTE_IMAGE_1_URL_HERE" alt="PRODUCT NAME" loading="lazy" />
+<button type="button" class="card-wishlist-btn" aria-label="Add to wishlist" onclick="event.stopPropagation(); toggleWishlist(this)"></button>
 </div>
+<div class="card-main">
 <div class="card-title">PRODUCT NAME</div>
-<span class="card-tag tag-value">TYPE</span><span class="card-tag tag-cooling">FEATURE</span>
-<p style="margin:6px 0;font-size:13px">One line about why this fits their needs</p>
-<div class="card-price">$X,XXX Size</div>
-<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-<button type="button" class="btn-primary" onclick="addToCart(PASTE_SHOPIFY_VARIANT_ID_FROM_THIS_PRODUCTS_ROW)">Add to cart</button>
-<button type="button" class="btn-secondary" onclick='openProduct("PASTE_PRODUCT_LINK_URL_HERE", "PRODUCT NAME")'>Ask more</button>
+<div class="card-actions-row">
+<div class="card-price">$X,XXX</div>
+<div class="card-buttons">
+<button type="button" class="btn-outline btn-compare" onclick="sendPrompt('Compare PRODUCT NAME with the others')">Compare</button>
+<button type="button" class="btn-outline" onclick='openProduct("PASTE_PRODUCT_LINK_URL_HERE", "PRODUCT NAME")'>View Product</button>
+<button type="button" class="btn-cart" onclick="addToCart(PASTE_SHOPIFY_VARIANT_ID_FROM_THIS_PRODUCTS_ROW)">Add to Cart</button>
 </div>
+</div>
+</div>
+</div>
+<div class="card-footer"><strong>Why it fits:</strong> One line about why this fits their needs.</div>
 </div>
 THREE_BACKTICKS
 
-- **View product** and clicking the **image** must call **openProduct** with the exact **Product Link** URL from the catalog AND the product name as arguments. Do not invent URLs.
-- **Add to Cart** button is MANDATORY on EVERY product card — no exceptions. The onclick handler uses THAT PRODUCT ROW'S **Shopify Variant ID** column from CATALOG_DATA. Format: addToCart(NUMERIC_VARIANT_ID). Each card uses ITS OWN variant id from its own row — never reuse the same id across different products.
-- The second footer button should be a curiosity action like **Ask more** or **View details**, and it must call **openProduct("PRODUCT_LINK_URL", "PRODUCT NAME")**.
-- If a catalog row has NO **Shopify Variant ID** (empty cell), use openProduct("PRODUCT_LINK_URL", "PRODUCT NAME") on the Add to Cart button instead — this opens the product page so the customer can add from there. NEVER use sendPrompt('Add X to cart') on the Add to Cart button — that just sends a text message and doesn't actually add to cart.
-- Use the exact **Image 1** URL in the img element's src attribute (optional second image: add another img using **Image 2** if present).
-- For onclick handlers, use single quotes on the outside and double quotes around the URL inside openProduct(...) so URLs stay intact.
+- Use this exact structure and class names — the host styles the layout (image left, actions right, "Why it fits" footer).
+- **View Product**, clicking the **image**, and the wishlist control stay in the card-media and card-main sections as shown; image click still calls **openProduct** with the exact **Product Link** URL and product name.
+- **Compare** must use **sendPrompt** with a message that names the product (e.g. \`Compare PRODUCT NAME with the others\`).
+- **Add to Cart** is MANDATORY on every card. Use **addToCart(NUMERIC_VARIANT_ID)** from that row's **Shopify Variant ID**. Each card uses its own variant id — never reuse across products.
+- If a catalog row has NO **Shopify Variant ID**, use **openProduct("PRODUCT_LINK_URL", "PRODUCT NAME")** on the Add to Cart button instead. NEVER use sendPrompt on Add to Cart.
+- Put the one-line fit reason only in the card-footer block after **Why it fits:** — not in a separate paragraph or tag row.
+- Use the exact **Image 1** URL in the img src (optional **Image 2** only if you add a second img).
+- For onclick handlers, use single quotes on the outside and double quotes around URLs inside openProduct(...) so URLs stay intact.
 
 Each product = its own separate card in its own HTML code block.
 
@@ -326,43 +356,6 @@ THREE_BACKTICKS_html
 THREE_BACKTICKS
 
 Replace TOP_PICK_NAME and TOP_PICK with the actual product name. This action bar appears after EVERY product recommendation.
-
-### ABSOLUTE RULE: ALL Discovery Tiles are Multi-Select
-
-During discovery, EVERY pill in EVERY HTML block MUST use toggleSelect(). NEVER use sendPrompt() on discovery pills — not even for sleep position. The customer selects everything they want across ALL sections, then hits one Submit button at the bottom.
-
-This is because discovery blocks combine multiple questions (sleep position + size + budget). If ANY pill uses sendPrompt(), it fires immediately and the customer can't finish selecting the rest.
-
-Example — a combined discovery block (ALL pills use toggleSelect, ONE Submit at the end):
-
-THREE_BACKTICKS_html
-<p style="font-size:13px;margin-bottom:4px;font-weight:600">🛏️ How do you sleep?</p>
-<div class="flex-wrap">
-<button class="pill" onclick="toggleSelect(this,'Side sleeper')">🛏️ Side</button>
-<button class="pill" onclick="toggleSelect(this,'Back sleeper')">🔄 Back</button>
-<button class="pill" onclick="toggleSelect(this,'Stomach sleeper')">😴 Stomach</button>
-<button class="pill" onclick="toggleSelect(this,'Combination sleeper')">🔀 I move around</button>
-</div>
-<p style="font-size:13px;margin:8px 0 4px;font-weight:600">📐 What size?</p>
-<div class="flex-wrap">
-<button class="pill" onclick="toggleSelect(this,'Twin')">Twin</button>
-<button class="pill" onclick="toggleSelect(this,'Twin XL')">Twin XL</button>
-<button class="pill" onclick="toggleSelect(this,'Full')">Full</button>
-<button class="pill" onclick="toggleSelect(this,'Queen')">Queen</button>
-<button class="pill" onclick="toggleSelect(this,'King')">King</button>
-<button class="pill" onclick="toggleSelect(this,'Cal King')">Cal King</button>
-</div>
-<p style="font-size:13px;margin:8px 0 4px;font-weight:600">💰 Budget?</p>
-<div class="flex-wrap">
-<button class="pill" onclick="toggleSelect(this,'Under $800')">Under $800</button>
-<button class="pill" onclick="toggleSelect(this,'$800-$1,500')">$800-$1,500</button>
-<button class="pill" onclick="toggleSelect(this,'$1,500-$3,000')">$1,500-$3,000</button>
-<button class="pill" onclick="toggleSelect(this,'$3,000+')">$3,000+</button>
-</div>
-<button class="btn-submit" onclick="submitSelected('My preferences: ')">Show my matches →</button>
-THREE_BACKTICKS
-
-NEVER use sendPrompt() inside any discovery HTML block. ALL pills use toggleSelect(). ONE Submit button at the end. No exceptions.
 
 ### Post-Product Tiles
 

@@ -75,6 +75,15 @@ export interface SessionState {
   updatedAt?: string;
 }
 
+export interface SessionHistoryItem {
+  sessionId: string;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
+  previewText: string;
+  messageCount: number;
+}
+
 export interface TenantBootstrap {
   tenant: TenantRuntimeConfig;
   tenantToken: string;

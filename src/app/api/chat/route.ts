@@ -4,6 +4,7 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   generateId,
+  isLoopFinished,
   streamText,
   type LanguageModelUsage,
   type UIMessage,
@@ -30,6 +31,7 @@ import { isComplaintMessage } from "@/lib/complaint-detection";
 import { getWelcomeMessage } from "@/lib/widget-config";
 import type { WidgetBranding } from "@/lib/widget-config";
 import { buildTenantCatalogContext, getActiveCatalogDataset, recordConversationAnalytics, resolveTenantFromToken } from "@/lib/tenant-platform";
+import { chatTools } from "@/tools";
 
 export const maxDuration = 60;
 
@@ -197,6 +199,8 @@ function buildTrackedStreamResponse(input: {
 }): Response {
   const result = streamText({
     ...input.streamArgs,
+    tools: chatTools,
+    stopWhen: isLoopFinished(),
     onFinish: async (event) => {
       if (!input.sessionId) return;
       const usage: LanguageModelUsage = event.totalUsage;

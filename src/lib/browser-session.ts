@@ -23,6 +23,10 @@ function uid(): string {
   return `shopassist_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+export function createBrowserSessionId(): string {
+  return uid();
+}
+
 export function getBrowserSessionId(): string {
   const win = safeWindow();
   if (!win) return uid();
@@ -35,5 +39,16 @@ export function getBrowserSessionId(): string {
     return next;
   } catch {
     return uid();
+  }
+}
+
+export function setBrowserSessionId(sessionId: string) {
+  const win = safeWindow();
+  if (!win) return;
+  const key = getScopedStorageKey("session_id");
+  try {
+    win.localStorage.setItem(key, sessionId);
+  } catch {
+    // ignore storage errors
   }
 }
