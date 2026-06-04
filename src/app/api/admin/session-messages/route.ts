@@ -4,7 +4,6 @@ import { queryDb } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify admin is authenticated
     if (!(await isAdminAuthenticated())) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -20,19 +19,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch messages for the session
     const result = await queryDb(
       `
-      SELECT 
-        cm.id,
-        cm.role,
-        cm.text,
-        cm.sort_order,
-        cm.created_at
-      FROM conversation_messages cm
-      INNER JOIN conversations c ON c.id = cm.conversation_id
-      WHERE c.tenant_id = $1 AND c.session_id = $2
-      ORDER BY cm.sort_order ASC
+      SELECT
+        m.id,
+        m.role,
+        m.text,
+        m.parts_json,
+        m.sort_order,
+        m.created_at
+      FROM messages_v2 m
+      INNER JOIN sessions_v2 s ON s.id = m.session_id
+      WHERE s.tenant_id = $1 AND s.client_session_id = $2
+      ORDER BY m.sort_order ASC
       `,
       [tenantId, sessionId]
     );

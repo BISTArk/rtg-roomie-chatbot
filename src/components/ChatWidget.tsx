@@ -4,12 +4,14 @@ import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
   generateId,
+  lastAssistantMessageIsCompleteWithToolCalls,
   readUIMessageStream,
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatHeader } from "./ChatHeader";
+import { ChatHistory } from "./ChatHistory";
 import { ChatMessages } from "./ChatMessages";
 import { ChatInput } from "./ChatInput";
 import { WidgetAvatar } from "./WidgetAvatar";
@@ -47,12 +49,14 @@ import {
   type WidgetBranding,
 } from "@/lib/widget-config";
 import {
+  createBrowserSessionId,
   getBrowserSessionId,
   getScopedStorageKey,
+  setBrowserSessionId,
   setStorageNamespace,
 } from "@/lib/browser-session";
 import type { PersistedChatMessage } from "@/lib/chat-types";
-import type { TenantBootstrap } from "@/lib/platform-types";
+import type { SessionHistoryItem, TenantBootstrap } from "@/lib/platform-types";
 
 export type ChatMessage = PersistedChatMessage;
 
@@ -108,6 +112,7 @@ function uiMessageToChatMessage(m: UIMessage): ChatMessage {
     id: m.id,
     role: m.role as "user" | "assistant",
     text: stripStageTag(getTextFromUIMessage(m)),
+    parts: m.parts,
   };
 }
 
@@ -115,7 +120,7 @@ function chatMessageToUi(m: ChatMessage): UIMessage {
   return {
     id: m.id,
     role: m.role,
-    parts: [{ type: "text", text: m.text }],
+    parts: m.parts?.length ? m.parts : [{ type: "text", text: m.text }],
   };
 }
 
@@ -201,6 +206,35 @@ async function fetchTenantBootstrap(input: {
   return (await response.json()) as TenantBootstrap;
 }
 
+async function syncSessionToDb(input: {
+  tenantKey: string;
+  tenantToken: string;
+  sessionId: string;
+  hostOrigin: string;
+  messages: PersistedChatMessage[];
+  visitorProfile?: VisitorProfile | null;
+}) {
+  const response = await fetch("/api/session", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-tenant-token": input.tenantToken,
+    },
+    body: JSON.stringify({
+      tenantKey: input.tenantKey,
+      sessionId: input.sessionId,
+      hostOrigin: input.hostOrigin,
+      lastPageUrl: typeof window !== "undefined" ? window.location.href : undefined,
+      messages: input.messages,
+      visitorProfile: input.visitorProfile ?? null,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to sync session.");
+  }
+}
+
 export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -220,6 +254,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [browsingHistory, setBrowsingHistory] = useState<BrowsingHistoryEntry[]>([]);
   const [humanMode, setHumanMode] = useState(false);
+  const [historySessions, setHistorySessions] = useState<SessionHistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isHistoryClosing, setIsHistoryClosing] = useState(false);
+  const [isHistoryMounted, setIsHistoryMounted] = useState(false);
   const welcomeUi = useMemo(
     () => buildWelcomeUi(widgetConfig.branding),
     [widgetConfig.branding]
@@ -285,6 +323,52 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const CONTEXTUAL_COOLDOWN_MS = 30 * 1000;       // 30 seconds between messages
   const CONTEXTUAL_DWELL_MS = 5 * 1000;            // must stay 5s on PDP
 
+  const refreshHistorySessions = useCallback(async () => {
+    if (!tenantTokenRef.current || !tenantKeyRef.current) {
+      setHistorySessions([]);
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        tenantKey: tenantKeyRef.current,
+        limit: "20",
+      });
+      const response = await fetch(`/api/sessions?${params.toString()}`, {
+        headers: {
+          "x-tenant-token": tenantTokenRef.current,
+        },
+      });
+      if (!response.ok) throw new Error("Failed to load sessions.");
+      const payload = (await response.json()) as { sessions?: SessionHistoryItem[] };
+      setHistorySessions(Array.isArray(payload.sessions) ? payload.sessions : []);
+    } catch {
+      setHistorySessions([]);
+    }
+  }, []);
+
+  const openHistory = useCallback(() => {
+    setIsHistoryClosing(false);
+    setIsHistoryMounted(true);
+    setShowHistory(true);
+    void refreshHistorySessions();
+  }, [refreshHistorySessions]);
+
+  const closeHistory = useCallback(() => {
+    setIsHistoryClosing(true);
+    setTimeout(() => {
+      setIsHistoryMounted(false);
+      setShowHistory(false);
+      setIsHistoryClosing(false);
+    }, 250);
+  }, []);
+
+  useEffect(() => {
+    if (showHistory) {
+      void refreshHistorySessions();
+    }
+  }, [showHistory, sessionId, refreshHistorySessions]);
+
   useEffect(() => {
     isOpenRef.current = isOpen;
     // Tell embed.js to resize the iframe
@@ -342,10 +426,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     []
   );
 
-  const { messages, sendMessage, setMessages, status, stop } = useChat({
+  const { messages, sendMessage, setMessages, status, stop, addToolOutput } = useChat({
     id: CHAT_ID,
     transport,
     messages: [welcomeUi],
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
 
   const isStreaming = status === "streaming" || status === "submitted";
@@ -831,20 +916,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   useEffect(() => {
     if (!loaded || !tenantToken || !tenantKey || !sessionId) return;
     const timeout = setTimeout(() => {
-      void fetch("/api/session", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-tenant-token": tenantToken,
-        },
-        body: JSON.stringify({
-          tenantKey,
-          sessionId,
-          hostOrigin: hostOriginRef.current,
-          lastPageUrl: typeof window !== "undefined" ? window.location.href : undefined,
-          messages: displayMessages,
-          visitorProfile: visitorProfileRef.current,
-        }),
+      void syncSessionToDb({
+        tenantKey,
+        tenantToken,
+        sessionId,
+        hostOrigin: hostOriginRef.current,
+        messages: displayMessages,
+        visitorProfile: visitorProfileRef.current,
       }).catch((error) => {
         console.error("[widget] session sync failed:", error);
       });
@@ -852,6 +930,116 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
     return () => clearTimeout(timeout);
   }, [displayMessages, loaded, sessionId, tenantKey, tenantToken, visitorProfile]);
+
+  const restoreSession = useCallback(
+    async (nextSessionId: string) => {
+      const bootstrap = await fetchTenantBootstrap({
+        tenantKey: tenantKeyRef.current,
+        sessionId: nextSessionId,
+        hostOrigin: hostOriginRef.current,
+      });
+
+      setBootstrapError("");
+      setTenantToken(bootstrap.tenantToken);
+      setSessionId(nextSessionId);
+      if (embed && typeof window !== "undefined" && window.parent !== window) {
+        window.parent.postMessage(
+          { type: "shop-assist-set-session-id", sessionId: nextSessionId },
+          "*"
+        );
+      } else {
+        setBrowserSessionId(nextSessionId);
+      }
+
+      initFromBridge(bootstrap.session.messages || null, embed);
+      initProfileFromBridge(bootstrap.session.visitorProfile || null, embed);
+      setHumanMode(false);
+      setMessages(
+        bootstrap.session.messages?.length
+          ? bootstrap.session.messages.map(chatMessageToUi)
+          : [buildWelcomeUi(brandingRef.current)]
+      );
+      setVisitorProfile(bootstrap.session.visitorProfile || recordVisit({
+        productName: pageContextRef.current?.productName,
+        category: pageContextRef.current?.category,
+        purchasedProducts: pageContextRef.current?.purchasedProducts,
+      }));
+    },
+    [embed, setMessages]
+  );
+
+  const handleSelectHistorySession = useCallback(
+    async (nextSessionId: string) => {
+      if (!tenantKeyRef.current || !tenantTokenRef.current || !nextSessionId) return;
+      if (nextSessionId === sessionIdRef.current) {
+        closeHistory();
+        return;
+      }
+
+      try {
+        if (loaded && sessionIdRef.current) {
+          await syncSessionToDb({
+            tenantKey: tenantKeyRef.current,
+            tenantToken: tenantTokenRef.current,
+            sessionId: sessionIdRef.current,
+            hostOrigin: hostOriginRef.current,
+            messages: messages.map(uiMessageToChatMessage),
+            visitorProfile: visitorProfileRef.current,
+          });
+        }
+        await restoreSession(nextSessionId);
+        closeHistory();
+      } catch (error) {
+        console.error("[widget] failed to restore session:", error);
+      }
+    },
+    [closeHistory, loaded, messages, restoreSession]
+  );
+
+  const handleDeleteHistorySession = useCallback(
+    async (targetSessionId: string) => {
+      if (!tenantKeyRef.current || !tenantTokenRef.current || !targetSessionId) return;
+
+      try {
+        const response = await fetch("/api/sessions", {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            "x-tenant-token": tenantTokenRef.current,
+          },
+          body: JSON.stringify({
+            tenantKey: tenantKeyRef.current,
+            sessionId: targetSessionId,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to delete session.");
+        }
+
+        if (targetSessionId === sessionIdRef.current) {
+          const nextSessionId = createBrowserSessionId();
+          clearMessages();
+          setMessages([welcomeUi]);
+          setHumanMode(false);
+          setSessionId(nextSessionId);
+          if (embed && typeof window !== "undefined" && window.parent !== window) {
+            window.parent.postMessage(
+              { type: "shop-assist-set-session-id", sessionId: nextSessionId },
+              "*"
+            );
+          } else {
+            setBrowserSessionId(nextSessionId);
+          }
+        }
+
+        await refreshHistorySessions();
+      } catch (error) {
+        console.error("[widget] failed to delete session:", error);
+      }
+    },
+    [embed, refreshHistorySessions, setMessages, welcomeUi]
+  );
 
   // Scroll to bottom when widget opens or chat is restored.
   // Product card iframes resize asynchronously (images load, content expands),
@@ -1249,9 +1437,19 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, [visitorProfile, messages.length, generateReturningGreeting]);
 
   const handleRefresh = useCallback(() => {
+    const nextSessionId = createBrowserSessionId();
     clearMessages();
     setMessages([welcomeUi]);
     setHumanMode(false);
+    setSessionId(nextSessionId);
+    if (embed && typeof window !== "undefined" && window.parent !== window) {
+      window.parent.postMessage(
+        { type: "shop-assist-set-session-id", sessionId: nextSessionId },
+        "*"
+      );
+    } else {
+      setBrowserSessionId(nextSessionId);
+    }
     // Customer asked for a clean slate — suppress the "Welcome back..."
     // greeting until they actually send a message. Persists across sessions
     // via embed bridge (host localStorage) or standalone localStorage.
@@ -1262,7 +1460,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       try { localStorage.setItem(getScopedStorageKey("suppress_returning"), "1"); }
       catch { /* noop */ }
     }
-  }, [setMessages, embed, welcomeUi]);
+    if (showHistory) {
+      void refreshHistorySessions();
+    }
+  }, [setMessages, embed, refreshHistorySessions, showHistory, welcomeUi]);
 
   const handleShare = useCallback(async () => {
     const shareableMessages = displayMessages.filter((m) => m.id !== "welcome");
@@ -1480,7 +1681,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           />
 
           <div
-            className={`widget-enter fixed bottom-0 z-50 flex h-[80dvh] max-h-[80dvh] w-[min(420px,100vw)] max-w-[100vw] flex-col overflow-hidden rounded-t-[28px] shadow-2xl sm:bottom-6 sm:h-[640px] sm:max-h-[640px] sm:w-[420px] sm:rounded-2xl ${panelPositionClass} ${embed ? "pointer-events-auto" : ""}`}
+            className={`widget-enter fixed bottom-0 z-50 flex h-[min(820px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[100vw] flex-col overflow-hidden rounded-t-[28px] shadow-2xl sm:bottom-6 sm:h-[760px] sm:w-[560px] sm:rounded-2xl lg:w-[640px] ${panelPositionClass} ${embed ? "pointer-events-auto" : ""}`}
             style={{
               border: "1px solid var(--widget-border)",
               backgroundColor: "var(--widget-surface)",
@@ -1491,19 +1692,30 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
             <ChatHeader
               onMinimize={() => setIsOpen(false)}
               onRefresh={handleRefresh}
+              onToggleHistory={() => (showHistory ? closeHistory() : openHistory())}
+              isHistoryOpen={showHistory}
               onShare={handleShare}
               branding={widgetConfig.branding}
               theme={widgetConfig.theme}
             />
 
             <ChatMessages
-              messages={displayMessages}
+              messages={messages.filter(
+                (message) => message.role === "user" || message.role === "assistant"
+              )}
               isStreaming={isStreaming}
               messagesEndRef={messagesEndRef}
               lastAssistantRef={lastAssistantRef}
               scrollContainerRef={scrollContainerRef}
               branding={widgetConfig.branding}
               theme={widgetConfig.theme}
+              onToolOptionSelect={({ toolCallId, answers }) => {
+                addToolOutput({
+                  tool: "ask_user_question",
+                  toolCallId,
+                  output: { answers },
+                });
+              }}
             />
 
             <ChatInput
@@ -1515,6 +1727,38 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
               onChipClick={handleSend}
               branding={widgetConfig.branding}
             />
+
+            {isHistoryMounted && (
+              <>
+                <div
+                  className={
+                    isHistoryClosing
+                      ? "history-backdrop-exit absolute inset-0 z-10 bg-black/20"
+                      : "history-backdrop-enter absolute inset-0 z-10 bg-black/20"
+                  }
+                  onClick={closeHistory}
+                />
+                <div
+                  className={
+                    isHistoryClosing
+                      ? "history-sidebar-exit absolute bottom-0 right-0 top-0 z-20 w-[280px] border-l border-[var(--widget-border)] bg-[var(--widget-surface)] shadow-lg"
+                      : "history-sidebar-enter absolute bottom-0 right-0 top-0 z-20 w-[280px] border-l border-[var(--widget-border)] bg-[var(--widget-surface)] shadow-lg"
+                  }
+                >
+                  <ChatHistory
+                    sessions={historySessions}
+                    activeSessionId={sessionId || null}
+                    onSelectSession={handleSelectHistorySession}
+                    onDeleteSession={handleDeleteHistorySession}
+                    onNewChat={() => {
+                      handleRefresh();
+                      closeHistory();
+                    }}
+                    onClose={closeHistory}
+                  />
+                </div>
+              </>
+            )}
           </div>
         </>
       )}

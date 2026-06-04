@@ -10,6 +10,7 @@ import type {
   CatalogSourceRecord,
   CatalogSourceType,
   CatalogVersionRecord,
+  SessionHistoryItem,
   SessionState,
   ShopifyInstallationRecord,
   ShopifyInstallStatus,
@@ -29,6 +30,13 @@ import type { PersistedChatMessage, SharedChatMessage } from "@/lib/chat-types";
 import type { VisitorProfile } from "@/lib/visitor-profile";
 import { formatRetrievedCatalog, queryFullCatalog } from "@/lib/catalog-retrieval";
 import { getDefaultSkillPrompt, getDefaultSystemPrompt } from "@/lib/system-prompt";
+import {
+  deleteAiSdkSessionHistory,
+  ensureSessionRecord,
+  listAiSdkSessionHistory,
+  loadAiSdkSessionState,
+  saveAiSdkSessionState,
+} from "@/lib/ai-sdk-sessions";
 
 const DEFAULT_TENANT_KEY = "shop-assist-demo";
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -429,6 +437,14 @@ function sanitizeMessages(messages: PersistedChatMessage[] | null | undefined): 
         (message.role === "user" || message.role === "assistant") &&
         typeof message.text === "string"
     )
+    .map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      ...(Array.isArray(message.parts) && message.parts.length > 0
+        ? { parts: message.parts }
+        : {}),
+    }))
     .slice(-100);
 }
 
@@ -558,36 +574,6 @@ async function loadTenantDomains(client: PoolClient, tenantId: string): Promise<
     [tenantId]
   );
   return result.rows.map((row) => row.hostname);
-}
-
-async function ensureConversationRecord(
-  client: PoolClient,
-  input: {
-    tenantId: string;
-    sessionId: string;
-    hostOrigin?: string | null;
-    lastPageUrl?: string | null;
-  }
-): Promise<string> {
-  const conversationResult = await client.query<{ id: string }>(
-    `INSERT INTO conversations (id, tenant_id, session_id, host_origin, last_page_url)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (tenant_id, session_id)
-     DO UPDATE SET
-       host_origin = COALESCE(EXCLUDED.host_origin, conversations.host_origin),
-       last_page_url = COALESCE(EXCLUDED.last_page_url, conversations.last_page_url),
-       updated_at = NOW()
-     RETURNING id`,
-    [
-      randomUUID(),
-      input.tenantId,
-      input.sessionId,
-      normalizeOrigin(input.hostOrigin),
-      input.lastPageUrl ?? null,
-    ]
-  );
-
-  return conversationResult.rows[0].id;
 }
 
 async function findPreferredTenantIdByDomains(
@@ -800,49 +786,7 @@ export async function loadSessionState(
   tenantId: string,
   sessionId: string
 ): Promise<SessionState> {
-  if (!hasDatabase()) {
-    return { sessionId, messages: [], visitorProfile: null };
-  }
-
-  await ensurePlatformSchema();
-  return withDb(async (client) => {
-    const conversationResult = await client.query<{ id: string; updated_at: string }>(
-      `SELECT id, updated_at FROM conversations WHERE tenant_id = $1 AND session_id = $2 LIMIT 1`,
-      [tenantId, sessionId]
-    );
-    const conversation = conversationResult.rows[0];
-    const messages = conversation
-      ? (
-          await client.query<{
-            id: string;
-            role: "user" | "assistant";
-            text: string;
-          }>(
-            `SELECT id, role, text
-             FROM conversation_messages
-             WHERE conversation_id = $1
-             ORDER BY sort_order ASC`,
-            [conversation.id]
-          )
-        ).rows
-      : [];
-
-    const profileResult = await client.query<{ profile_json: VisitorProfile }>(
-      `SELECT profile_json FROM visitor_profiles WHERE tenant_id = $1 AND session_id = $2 LIMIT 1`,
-      [tenantId, sessionId]
-    );
-
-    return {
-      sessionId,
-      messages: messages.map((message: { id: string; role: "user" | "assistant"; text: string }) => ({
-        id: message.id,
-        role: message.role,
-        text: message.text,
-      })),
-      visitorProfile: profileResult.rows[0]?.profile_json ?? null,
-      updatedAt: conversation?.updated_at,
-    };
-  });
+  return loadAiSdkSessionState(tenantId, sessionId);
 }
 
 export async function saveSessionState(input: {
@@ -854,51 +798,29 @@ export async function saveSessionState(input: {
   visitorProfile?: VisitorProfile | null;
 }): Promise<void> {
   if (!hasDatabase()) return;
-  await ensurePlatformSchema();
 
   const sanitizedMessages = sanitizeMessages(input.messages);
   const sanitizedProfile = sanitizeProfile(input.visitorProfile);
 
-  await withDb(async (client) => {
-    await client.query("BEGIN");
-    try {
-      const conversationId = await ensureConversationRecord(client, {
-        tenantId: input.tenantId,
-        sessionId: input.sessionId,
-        hostOrigin: input.hostOrigin,
-        lastPageUrl: input.lastPageUrl,
-      });
-
-      await client.query(
-        `DELETE FROM conversation_messages WHERE conversation_id = $1`,
-        [conversationId]
-      );
-
-      for (let index = 0; index < sanitizedMessages.length; index++) {
-        const message = sanitizedMessages[index];
-        await client.query(
-          `INSERT INTO conversation_messages (id, conversation_id, sort_order, role, text)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [randomUUID(), conversationId, index, message.role, message.text]
-        );
-      }
-
-      if (sanitizedProfile) {
-        await client.query(
-          `INSERT INTO visitor_profiles (id, tenant_id, session_id, profile_json)
-           VALUES ($1, $2, $3, $4::jsonb)
-           ON CONFLICT (tenant_id, session_id)
-           DO UPDATE SET profile_json = EXCLUDED.profile_json, updated_at = NOW()`,
-          [randomUUID(), input.tenantId, input.sessionId, JSON.stringify(sanitizedProfile)]
-        );
-      }
-
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    }
+  await saveAiSdkSessionState({
+    ...input,
+    messages: sanitizedMessages,
+    visitorProfile: sanitizedProfile,
   });
+}
+
+export async function listSessionHistory(
+  tenantId: string,
+  limit = 20
+): Promise<SessionHistoryItem[]> {
+  return listAiSdkSessionHistory(tenantId, limit);
+}
+
+export async function deleteSessionHistory(input: {
+  tenantId: string;
+  sessionId: string;
+}): Promise<void> {
+  return deleteAiSdkSessionHistory(input);
 }
 
 export async function recordConversationAnalytics(input: {
@@ -923,10 +845,10 @@ export async function recordConversationAnalytics(input: {
   await ensurePlatformSchema();
 
   await withDb(async (client) => {
-    const conversationId = await ensureConversationRecord(client, {
+    const sessionRowId = await ensureSessionRecord(client, {
       tenantId: input.tenantId,
-      sessionId: input.sessionId,
-      hostOrigin: input.hostOrigin,
+      clientSessionId: input.sessionId,
+      hostOrigin: normalizeOrigin(input.hostOrigin),
     });
 
     await client.query(
@@ -955,7 +877,7 @@ export async function recordConversationAnalytics(input: {
       [
         randomUUID(),
         input.tenantId,
-        conversationId,
+        sessionRowId,
         input.sessionId,
         input.requestType.trim(),
         input.conversationStage?.trim() || null,
@@ -988,8 +910,8 @@ export async function listTenantAnalyticsSummaries(
 
     appendTenantAndDateFilters({
       filters,
-      tenantColumn: "c.tenant_id",
-      timestampColumn: "c.updated_at",
+      tenantColumn: "s.tenant_id",
+      timestampColumn: "s.updated_at",
       conditions: messageConditions,
       params,
     });
@@ -1005,29 +927,29 @@ export async function listTenantAnalyticsSummaries(
     const result = await client.query<ConversationAnalyticsSummaryRow>(
       `WITH message_stats AS (
          SELECT
-           c.tenant_id,
-           COUNT(DISTINCT c.session_id) AS session_count,
-           COUNT(cm.id) AS message_count,
-           COUNT(*) FILTER (WHERE cm.role = 'user') AS user_message_count,
-           COUNT(*) FILTER (WHERE cm.role = 'assistant') AS assistant_message_count,
-           MAX(c.updated_at) AS last_conversation_at
-         FROM conversations c
-         LEFT JOIN conversation_messages cm ON cm.conversation_id = c.id
+           s.tenant_id,
+           COUNT(DISTINCT s.client_session_id) AS session_count,
+           COUNT(m.id) AS message_count,
+           COUNT(*) FILTER (WHERE m.role = 'user') AS user_message_count,
+           COUNT(*) FILTER (WHERE m.role = 'assistant') AS assistant_message_count,
+           MAX(s.updated_at) AS last_conversation_at
+         FROM sessions_v2 s
+         LEFT JOIN messages_v2 m ON m.session_id = s.id
          WHERE ${messageConditions.join(" AND ")}
-         GROUP BY c.tenant_id
+         GROUP BY s.tenant_id
        ),
        session_engagement AS (
          SELECT
-           c.tenant_id,
-           COUNT(DISTINCT CASE WHEN user_msg_count > 2 THEN c.session_id END) AS engaged_session_count
-         FROM conversations c
+           s.tenant_id,
+           COUNT(DISTINCT CASE WHEN user_msg_count > 2 THEN s.client_session_id END) AS engaged_session_count
+         FROM sessions_v2 s
          INNER JOIN (
-           SELECT conversation_id, COUNT(*) FILTER (WHERE role = 'user') AS user_msg_count
-           FROM conversation_messages
-           GROUP BY conversation_id
-         ) cm ON cm.conversation_id = c.id
+           SELECT session_id, COUNT(*) FILTER (WHERE role = 'user') AS user_msg_count
+           FROM messages_v2
+           GROUP BY session_id
+         ) m ON m.session_id = s.id
          WHERE ${messageConditions.join(" AND ")}
-         GROUP BY c.tenant_id
+         GROUP BY s.tenant_id
        ),
        analytics_stats AS (
          SELECT
@@ -1093,29 +1015,29 @@ export async function listTenantSessionAnalyticsExportRecords(
 
     if (tenantIds.length > 0) {
       params.push(tenantIds);
-      conditions.push(`c.tenant_id = ANY($${params.length}::text[])`);
+      conditions.push(`s.tenant_id = ANY($${params.length}::text[])`);
     }
 
     if (excludedTenantIds.length > 0) {
       params.push(excludedTenantIds);
-      conditions.push(`NOT (c.tenant_id = ANY($${params.length}::text[]))`);
+      conditions.push(`NOT (s.tenant_id = ANY($${params.length}::text[]))`);
     }
 
     if (fromDate) {
       params.push(fromDate);
-      conditions.push(`COALESCE(ast.last_request_at, c.updated_at) >= $${params.length}::timestamptz`);
+      conditions.push(`COALESCE(ast.last_request_at, s.updated_at) >= $${params.length}::timestamptz`);
     }
 
     if (toDateExclusive) {
       params.push(toDateExclusive);
-      conditions.push(`COALESCE(ast.last_request_at, c.updated_at) < $${params.length}::timestamptz`);
+      conditions.push(`COALESCE(ast.last_request_at, s.updated_at) < $${params.length}::timestamptz`);
     }
 
     if (searchText) {
       params.push(`%${searchText}%`);
       conditions.push(`(
-        c.session_id ILIKE $${params.length}
-        OR COALESCE(c.host_origin, '') ILIKE $${params.length}
+        s.client_session_id ILIKE $${params.length}
+        OR COALESCE(s.host_origin, '') ILIKE $${params.length}
         OR t.name ILIKE $${params.length}
         OR t.tenant_key ILIKE $${params.length}
       )`);
@@ -1132,13 +1054,13 @@ export async function listTenantSessionAnalyticsExportRecords(
     const result = await client.query<ConversationAnalyticsSessionExportRow>(
       `WITH message_stats AS (
          SELECT
-           c.id AS conversation_id,
-           COUNT(cm.id) AS message_count,
-           COUNT(*) FILTER (WHERE cm.role = 'user') AS user_message_count,
-           COUNT(*) FILTER (WHERE cm.role = 'assistant') AS assistant_message_count
-         FROM conversations c
-         LEFT JOIN conversation_messages cm ON cm.conversation_id = c.id
-         GROUP BY c.id
+           s.id AS session_row_id,
+           COUNT(m.id) AS message_count,
+           COUNT(*) FILTER (WHERE m.role = 'user') AS user_message_count,
+           COUNT(*) FILTER (WHERE m.role = 'assistant') AS assistant_message_count
+         FROM sessions_v2 s
+         LEFT JOIN messages_v2 m ON m.session_id = s.id
+         GROUP BY s.id
        ),
        analytics_stats AS (
          SELECT
@@ -1155,23 +1077,23 @@ export async function listTenantSessionAnalyticsExportRecords(
        ),
        transcripts AS (
          SELECT
-           conversation_id,
+           session_id,
            STRING_AGG(
              CONCAT(UPPER(role), ': ', text),
              E'\n\n'
              ORDER BY sort_order ASC
            ) AS transcript
-         FROM conversation_messages
-         GROUP BY conversation_id
+         FROM messages_v2
+         GROUP BY session_id
        )
        SELECT
          t.id AS tenant_id,
          t.tenant_key,
          t.name AS tenant_name,
-         c.session_id,
-         c.host_origin,
-         c.created_at,
-         c.updated_at,
+         s.client_session_id AS session_id,
+         s.host_origin,
+         s.created_at,
+         s.updated_at,
          ast.last_request_at,
          COALESCE(ms.message_count, 0) AS message_count,
          COALESCE(ms.user_message_count, 0) AS user_message_count,
@@ -1182,13 +1104,13 @@ export async function listTenantSessionAnalyticsExportRecords(
          COALESCE(ast.total_tokens, 0) AS total_tokens,
          COALESCE(ast.error_count, 0) AS error_count,
          tr.transcript
-       FROM conversations c
-       INNER JOIN tenants t ON t.id = c.tenant_id
-       LEFT JOIN message_stats ms ON ms.conversation_id = c.id
-       LEFT JOIN analytics_stats ast ON ast.tenant_id = c.tenant_id AND ast.session_id = c.session_id
-       LEFT JOIN transcripts tr ON tr.conversation_id = c.id
+       FROM sessions_v2 s
+       INNER JOIN tenants t ON t.id = s.tenant_id
+       LEFT JOIN message_stats ms ON ms.session_row_id = s.id
+       LEFT JOIN analytics_stats ast ON ast.tenant_id = s.tenant_id AND ast.session_id = s.client_session_id
+       LEFT JOIN transcripts tr ON tr.session_id = s.id
        WHERE ${conditions.join(" AND ")}
-       ORDER BY COALESCE(ast.last_request_at, c.updated_at) DESC, c.updated_at DESC`,
+       ORDER BY COALESCE(ast.last_request_at, s.updated_at) DESC, s.updated_at DESC`,
       params
     );
 
@@ -1224,29 +1146,29 @@ export async function listTenantSessionAnalyticsPage(
 
     if (tenantIds.length > 0) {
       params.push(tenantIds);
-      conditions.push(`c.tenant_id = ANY($${params.length}::text[])`);
+      conditions.push(`s.tenant_id = ANY($${params.length}::text[])`);
     }
 
     if (excludedTenantIds.length > 0) {
       params.push(excludedTenantIds);
-      conditions.push(`NOT (c.tenant_id = ANY($${params.length}::text[]))`);
+      conditions.push(`NOT (s.tenant_id = ANY($${params.length}::text[]))`);
     }
 
     if (fromDate) {
       params.push(fromDate);
-      conditions.push(`COALESCE(ast.last_request_at, c.updated_at) >= $${params.length}::timestamptz`);
+      conditions.push(`COALESCE(ast.last_request_at, s.updated_at) >= $${params.length}::timestamptz`);
     }
 
     if (toDateExclusive) {
       params.push(toDateExclusive);
-      conditions.push(`COALESCE(ast.last_request_at, c.updated_at) < $${params.length}::timestamptz`);
+      conditions.push(`COALESCE(ast.last_request_at, s.updated_at) < $${params.length}::timestamptz`);
     }
 
     if (searchText) {
       params.push(`%${searchText}%`);
       conditions.push(`(
-        c.session_id ILIKE $${params.length}
-        OR COALESCE(c.host_origin, '') ILIKE $${params.length}
+        s.client_session_id ILIKE $${params.length}
+        OR COALESCE(s.host_origin, '') ILIKE $${params.length}
         OR t.name ILIKE $${params.length}
         OR t.tenant_key ILIKE $${params.length}
       )`);
@@ -1263,13 +1185,13 @@ export async function listTenantSessionAnalyticsPage(
     const result = await client.query<ConversationAnalyticsSessionRow>(
       `WITH message_stats AS (
          SELECT
-           c.id AS conversation_id,
-           COUNT(cm.id) AS message_count,
-           COUNT(*) FILTER (WHERE cm.role = 'user') AS user_message_count,
-           COUNT(*) FILTER (WHERE cm.role = 'assistant') AS assistant_message_count
-         FROM conversations c
-         LEFT JOIN conversation_messages cm ON cm.conversation_id = c.id
-         GROUP BY c.id
+           s.id AS session_row_id,
+           COUNT(m.id) AS message_count,
+           COUNT(*) FILTER (WHERE m.role = 'user') AS user_message_count,
+           COUNT(*) FILTER (WHERE m.role = 'assistant') AS assistant_message_count
+         FROM sessions_v2 s
+         LEFT JOIN messages_v2 m ON m.session_id = s.id
+         GROUP BY s.id
        ),
        analytics_stats AS (
          SELECT
@@ -1289,10 +1211,10 @@ export async function listTenantSessionAnalyticsPage(
          t.id AS tenant_id,
          t.tenant_key,
          t.name AS tenant_name,
-         c.session_id,
-         c.host_origin,
-         c.created_at,
-         c.updated_at,
+         s.client_session_id AS session_id,
+         s.host_origin,
+         s.created_at,
+         s.updated_at,
          ast.last_request_at,
          COALESCE(ms.message_count, 0) AS message_count,
          COALESCE(ms.user_message_count, 0) AS user_message_count,
@@ -1302,10 +1224,10 @@ export async function listTenantSessionAnalyticsPage(
          COALESCE(ast.completion_tokens, 0) AS completion_tokens,
          COALESCE(ast.total_tokens, 0) AS total_tokens,
          COALESCE(ast.error_count, 0) AS error_count
-       FROM conversations c
-       INNER JOIN tenants t ON t.id = c.tenant_id
-       LEFT JOIN message_stats ms ON ms.conversation_id = c.id
-       LEFT JOIN analytics_stats ast ON ast.tenant_id = c.tenant_id AND ast.session_id = c.session_id
+       FROM sessions_v2 s
+       INNER JOIN tenants t ON t.id = s.tenant_id
+       LEFT JOIN message_stats ms ON ms.session_row_id = s.id
+       LEFT JOIN analytics_stats ast ON ast.tenant_id = s.tenant_id AND ast.session_id = s.client_session_id
        WHERE ${conditions.join(" AND ")}
        )
        SELECT session_rows.*, COUNT(*) OVER() AS total_count
@@ -1891,7 +1813,7 @@ export async function ensureTenantForShopifyStorefront(input: {
         const tenantName = (normalizedStorefrontDomain || normalizedShopDomain)
           .replace(/^www\./, "")
           .replace(/\.myshopify\.com$/, "")
-          .replace(/ /g, "")
+          .replace(/\x00/g, "")
           .trim() || "Shopify Store";
         const appUrl = normalizedStorefrontDomain
           ? `https://${normalizedStorefrontDomain}`
@@ -2190,8 +2112,8 @@ export async function getTenantDebugSnapshot(tenantId: string): Promise<{
   return withDb(async (client) => {
     const [conversations, shares] = await Promise.all([
       client.query<{ session_id: string; updated_at: string }>(
-        `SELECT session_id, updated_at
-         FROM conversations
+        `SELECT client_session_id AS session_id, updated_at
+         FROM sessions_v2
          WHERE tenant_id = $1
          ORDER BY updated_at DESC
          LIMIT 20`,

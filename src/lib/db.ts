@@ -154,6 +154,40 @@ export async function ensurePlatformSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation
           ON conversation_messages(conversation_id, sort_order);
 
+        CREATE TABLE IF NOT EXISTS sessions_v2 (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+          client_session_id TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT 'New Chat',
+          preview_text TEXT NOT NULL DEFAULT '',
+          suggestions_json JSONB,
+          host_origin TEXT,
+          last_page_url TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (tenant_id, client_session_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sessions_v2_tenant_updated
+          ON sessions_v2(tenant_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS messages_v2 (
+          id TEXT NOT NULL,
+          session_id TEXT NOT NULL REFERENCES sessions_v2(id) ON DELETE CASCADE,
+          sort_order INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          text TEXT NOT NULL,
+          parts_json JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (session_id, id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_messages_v2_session
+          ON messages_v2(session_id, sort_order);
+
+        ALTER TABLE messages_v2 DROP CONSTRAINT IF EXISTS messages_v2_pkey;
+        ALTER TABLE messages_v2 ADD PRIMARY KEY (session_id, id);
+
         CREATE TABLE IF NOT EXISTS conversation_analytics (
           id TEXT PRIMARY KEY,
           tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -228,6 +262,9 @@ export async function ensurePlatformSchema(): Promise<void> {
 
         CREATE INDEX IF NOT EXISTS idx_shopify_installations_shop_domain
           ON shopify_installations(shop_domain);
+
+        ALTER TABLE conversation_analytics
+          DROP CONSTRAINT IF EXISTS conversation_analytics_conversation_id_fkey;
       `);
     });
   }

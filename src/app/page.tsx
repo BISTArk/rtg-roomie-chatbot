@@ -5,6 +5,7 @@ import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { getShopifyAppConfig, normalizeShopifyShopDomain } from "@/lib/shopify";
 import { getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
+import Script from "next/script";
 
 export default async function Home({
   searchParams,
@@ -68,6 +69,14 @@ export default async function Home({
       </div>
 
       <MockContextPanel />
+
+      <Script
+        id="shop-assist-demo-config"
+        strategy="beforeInteractive"
+        dangerouslySetInnerHTML={{
+          __html: `window.SHOP_ASSIST_CONFIG = Object.assign({}, window.SHOP_ASSIST_CONFIG || {}, { tenantKey: "shop-assist-demo" });`,
+        }}
+      />
 
       <ChatWidget />
     </main>

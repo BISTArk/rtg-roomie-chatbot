@@ -245,6 +245,12 @@
     return sid;
   }
 
+  function setSessionId(sessionId) {
+    var next = String(sessionId || "").trim();
+    if (!next) return;
+    safeSet(scopedStorageKey(STORAGE.SESSION), next);
+  }
+
   // ─── Shopify Page Context Detection ───────────────────────────────────
   function getShopifyContext() {
     var ctx = { page: "unknown" };
@@ -720,6 +726,12 @@
 
         case "shop-assist-clear-messages":
           safeRemove(scopedStorageKey(STORAGE.CHAT));
+          break;
+
+        case "shop-assist-set-session-id":
+          if (typeof e.data.sessionId === "string" && e.data.sessionId.trim()) {
+            setSessionId(e.data.sessionId);
+          }
           break;
 
         case "shop-assist-set-suppress-returning":
