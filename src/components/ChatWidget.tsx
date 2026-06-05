@@ -9,8 +9,10 @@ import {
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
+import { ArrowRightLeft, X } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatHeader } from "./ChatHeader";
+import { ChatFavourites } from "./ChatFavourites";
 import { ChatHistory } from "./ChatHistory";
 import { ChatMessages } from "./ChatMessages";
 import { ChatInput } from "./ChatInput";
@@ -56,7 +58,33 @@ import {
   setStorageNamespace,
 } from "@/lib/browser-session";
 import type { PersistedChatMessage } from "@/lib/chat-types";
+import {
+  configureFavouritesStorageNamespace,
+  initFavouritesFromBridge,
+  loadFavourites,
+  removeFavouriteFromList,
+  saveFavourites,
+  toggleFavouriteInList,
+  type FavouriteProduct,
+} from "@/lib/favourites-storage";
+import { fetchSuggestions } from "@/lib/chat-suggestions";
+import {
+  parseAssistantMarkup,
+  type ParsedAssistantMarkup,
+} from "@/lib/assistant-html";
+import {
+  createInterjectionMessageId,
+  dismissInterjection,
+  INTERJECTION_DISMISSED_KEY,
+  isInterjectionDismissed,
+  isInterjectionMessage,
+  pickInterjectionType,
+  STANDALONE_INTERJECTION_DELAY_MS,
+} from "@/lib/interjection";
+import { MessageResponse } from "@/components/ai-elements/message";
+import { Button } from "@/components/ui/button";
 import type { SessionHistoryItem, TenantBootstrap } from "@/lib/platform-types";
+import type { SelectableProductCard } from "@/lib/product-types";
 
 export type ChatMessage = PersistedChatMessage;
 
@@ -79,6 +107,8 @@ const HANDOFF_PHRASES = [
   "customer support",
   "representative",
 ];
+
+type ProductCard = SelectableProductCard;
 
 function buildWelcomeUi(branding: WidgetBranding): UIMessage {
   return {
@@ -213,6 +243,7 @@ async function syncSessionToDb(input: {
   hostOrigin: string;
   messages: PersistedChatMessage[];
   visitorProfile?: VisitorProfile | null;
+  suggestions?: string[];
 }) {
   const response = await fetch("/api/session", {
     method: "POST",
@@ -227,6 +258,7 @@ async function syncSessionToDb(input: {
       lastPageUrl: typeof window !== "undefined" ? window.location.href : undefined,
       messages: input.messages,
       visitorProfile: input.visitorProfile ?? null,
+      suggestions: input.suggestions ?? [],
     }),
   });
 
@@ -237,6 +269,9 @@ async function syncSessionToDb(input: {
 
 export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showInterjection, setShowInterjection] = useState(false);
+  const [interjectionContent, setInterjectionContent] =
+    useState<ParsedAssistantMarkup | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string>("");
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
@@ -258,6 +293,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [showHistory, setShowHistory] = useState(false);
   const [isHistoryClosing, setIsHistoryClosing] = useState(false);
   const [isHistoryMounted, setIsHistoryMounted] = useState(false);
+  const [favourites, setFavourites] = useState<FavouriteProduct[]>([]);
+  const [showFavourites, setShowFavourites] = useState(false);
+  const [isFavouritesClosing, setIsFavouritesClosing] = useState(false);
+  const [isFavouritesMounted, setIsFavouritesMounted] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState<ProductCard[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const suggestionsRef = useRef(suggestions);
   const welcomeUi = useMemo(
     () => buildWelcomeUi(widgetConfig.branding),
     [widgetConfig.branding]
@@ -274,14 +316,12 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     ? "left-0 right-auto sm:left-4 sm:right-auto"
     : "right-0 left-auto sm:right-6 sm:left-auto";
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const lastAssistantRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const handleSendRef = useRef<(text: string) => void>(undefined);
   const visitorProfileRef = useRef(visitorProfile);
   const selectedModelRef = useRef(selectedModel);
   const pageContextRef = useRef(pageContext);
   const browsingHistoryRef = useRef(browsingHistory);
+  const messagesRef = useRef<UIMessage[]>([]);
   const brandingRef = useRef(widgetConfig.branding);
   const tenantKeyRef = useRef(tenantKey);
   const tenantTokenRef = useRef(tenantToken);
@@ -347,12 +387,25 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     }
   }, []);
 
+  const dismissFavourites = useCallback(() => {
+    setIsFavouritesClosing(false);
+    setIsFavouritesMounted(false);
+    setShowFavourites(false);
+  }, []);
+
+  const dismissHistory = useCallback(() => {
+    setIsHistoryClosing(false);
+    setIsHistoryMounted(false);
+    setShowHistory(false);
+  }, []);
+
   const openHistory = useCallback(() => {
+    dismissFavourites();
     setIsHistoryClosing(false);
     setIsHistoryMounted(true);
     setShowHistory(true);
     void refreshHistorySessions();
-  }, [refreshHistorySessions]);
+  }, [dismissFavourites, refreshHistorySessions]);
 
   const closeHistory = useCallback(() => {
     setIsHistoryClosing(true);
@@ -361,6 +414,38 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       setShowHistory(false);
       setIsHistoryClosing(false);
     }, 250);
+  }, []);
+
+  const openFavourites = useCallback(() => {
+    dismissHistory();
+    setIsFavouritesClosing(false);
+    setIsFavouritesMounted(true);
+    setShowFavourites(true);
+  }, [dismissHistory]);
+
+  const closeFavourites = useCallback(() => {
+    setIsFavouritesClosing(true);
+    setTimeout(() => {
+      setIsFavouritesMounted(false);
+      setShowFavourites(false);
+      setIsFavouritesClosing(false);
+    }, 250);
+  }, []);
+
+  const toggleFavourite = useCallback((product: SelectableProductCard) => {
+    setFavourites((current) => {
+      const next = toggleFavouriteInList(current, product);
+      saveFavourites(next);
+      return next;
+    });
+  }, []);
+
+  const removeFavourite = useCallback((productKey: string) => {
+    setFavourites((current) => {
+      const next = removeFavouriteFromList(current, productKey);
+      saveFavourites(next);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -379,10 +464,18 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       );
     }
   }, [isOpen, embed]);
+  useEffect(() => {
+    if (!embed || typeof window === "undefined" || window.parent === window) return;
+    window.parent.postMessage(
+      { type: "shop-assist-widget-peek", visible: showInterjection && !isOpen },
+      "*"
+    );
+  }, [embed, showInterjection, isOpen]);
   useEffect(() => { visitorProfileRef.current = visitorProfile; }, [visitorProfile]);
   useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
   useEffect(() => { pageContextRef.current = pageContext; }, [pageContext]);
   useEffect(() => { browsingHistoryRef.current = browsingHistory; }, [browsingHistory]);
+  useEffect(() => { suggestionsRef.current = suggestions; }, [suggestions]);
   useEffect(() => { brandingRef.current = widgetConfig.branding; }, [widgetConfig.branding]);
   useEffect(() => { tenantKeyRef.current = tenantKey; }, [tenantKey]);
   useEffect(() => { tenantTokenRef.current = tenantToken; }, [tenantToken]);
@@ -431,9 +524,27 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     transport,
     messages: [welcomeUi],
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    onFinish: async ({ messages: completedMessages, finishReason, isAbort, isError }) => {
+      if (isAbort || isError || finishReason === "tool-calls") return;
+
+      try {
+        const parsed = await fetchSuggestions(
+          completedMessages,
+          tenantTokenRef.current,
+          tenantKeyRef.current
+        );
+        setSuggestions(parsed);
+      } catch {
+        setSuggestions([]);
+      }
+    },
   });
 
   const isStreaming = status === "streaming" || status === "submitted";
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const displayMessages: ChatMessage[] = messages.map(uiMessageToChatMessage);
 
@@ -471,6 +582,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setStorageNamespace(incomingNamespace);
         configureMessageStorageNamespace(incomingNamespace);
         configureProfileStorageNamespace(incomingNamespace);
+        configureFavouritesStorageNamespace(incomingNamespace);
         const incomingSessionId =
           String(data.sessionId || "").trim() || getBrowserSessionId();
 
@@ -507,6 +619,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
           initFromBridge(bootstrap.session.messages || data.chatMessages || null, true);
           initProfileFromBridge(bootstrap.session.visitorProfile || data.visitorProfile || null, true);
+          initFavouritesFromBridge(
+            Array.isArray(data.favourites) ? data.favourites : null,
+            true
+          );
+          setFavourites(loadFavourites());
           suppressReturningRef.current = data.suppressReturning === true;
 
           const saved = loadMessages();
@@ -515,6 +632,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           } else {
             setMessages([buildWelcomeUi(nextConfig.branding)]);
           }
+          setSuggestions(bootstrap.session.suggestions ?? []);
 
           const profile = recordVisit({
             productName: data.pageContext?.productName,
@@ -537,12 +655,18 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           setWidgetConfig(nextConfig);
           initFromBridge(data.chatMessages || null, true);
           initProfileFromBridge(data.visitorProfile || null, true);
+          initFavouritesFromBridge(
+            Array.isArray(data.favourites) ? data.favourites : null,
+            true
+          );
+          setFavourites(loadFavourites());
           const saved = loadMessages();
           const restored = saved && saved.length > 0 ? saved.map(chatMessageToUi) : [buildWelcomeUi(nextConfig.branding)];
           setMessages([
             ...restored,
             buildSystemNoticeUi(message),
           ]);
+          setSuggestions([]);
           setVisitorProfile(recordVisit({
             productName: data.pageContext?.productName,
             category: data.pageContext?.category,
@@ -649,13 +773,41 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         return;
       }
 
+      if (e.data?.type === "shop-assist-cart-action-result") {
+        const ok = Boolean(e.data.ok);
+        const error = typeof e.data.error === "string" ? e.data.error : "";
+        const text = ok
+          ? "Added to cart."
+          : error
+            ? `I couldn't add that to your cart: ${error}`
+            : "I couldn't add that to your cart. Please try again.";
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: generateId(),
+            role: "assistant",
+            parts: [{ type: "text", text }],
+          },
+        ]);
+
+        if (ok) {
+          const fallback = setTimeout(() => {
+            pendingUpsellRef.current = null;
+            triggerUpsellRef.current?.();
+          }, 1200);
+          pendingUpsellRef.current = { at: Date.now(), fallback };
+        }
+        return;
+      }
+
       // State 3 interjection from embed.js scheduler (chat closed + time
-      // threshold hit). Auto-open the chat and fire the matching API call.
+      // threshold hit). Keep it non-intrusive: render a closed-state bubble
+      // above the launcher instead of opening the full chat panel.
       if (e.data?.type === "shop-assist-interjection" && typeof e.data.interjectionType === "string") {
         const type = e.data.interjectionType as string;
-        setIsOpen(true);
         setTimeout(() => {
-          triggerInterjectionRef.current?.(type);
+          void triggerInterjectionRef.current?.(type);
         }, 250);
         return;
       }
@@ -677,110 +829,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         return;
       }
 
-      // Shopify cart / checkout from InlineHTML iframe (relay to host embed.js)
-      if (e.data?.type === "shop-assist-add-to-cart") {
-        if (!embed || typeof window === "undefined" || window.parent === window) {
-          return;
-        }
-        window.parent.postMessage(
-          {
-            type: "shop-assist-add-to-cart",
-            variantId: e.data.variantId,
-            quantity: e.data.quantity,
-          },
-          "*"
-        );
-        return;
-      }
-
-      // Cart action result coming BACK from embed.js after it hit
-      // Shopify's /cart/add.js. Surface a short acknowledgment in the
-      // chat so the customer knows the cart action happened.
-      if (e.data?.type === "shop-assist-cart-action-result") {
-        const ok = !!e.data.ok;
-        const productName = pageContextRef.current?.productName;
-        const successText = productName
-          ? `✅ Added **${productName}** to your cart!`
-          : "✅ Added to your cart!";
-        const errorText = e.data.error
-          ? `Hmm — couldn't add that to your cart. (${String(e.data.error).slice(0, 80)}) Try the Add to Cart button on the product page.`
-          : "Hmm — couldn't add that to your cart. Try the Add to Cart button on the product page.";
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: generateId(),
-            role: "assistant",
-            parts: [{ type: "text", text: ok ? successText : errorText }],
-          },
-        ]);
-        // On success, schedule a cross-sell/upsell — but wait for the
-        // cart refresh from embed.js before firing, so the AI sees the
-        // item we just added when deciding what to suggest next. The
-        // next shop-assist-page-context-update (which embed.js sends after
-        // fetchCart completes) will trigger the upsell. 3s fallback
-        // in case the context update is slow or fails.
-        if (ok) {
-          if (pendingUpsellRef.current?.fallback) {
-            clearTimeout(pendingUpsellRef.current.fallback);
-          }
-          const fallback = setTimeout(() => {
-            if (pendingUpsellRef.current) {
-              pendingUpsellRef.current = null;
-              triggerUpsellRef.current?.();
-            }
-          }, 3000);
-          pendingUpsellRef.current = { at: Date.now(), fallback };
-        }
-        return;
-      }
-      if (e.data?.type === "shop-assist-checkout") {
-        if (!embed || typeof window === "undefined" || window.parent === window) {
-          return;
-        }
-        window.parent.postMessage({ type: "shop-assist-checkout" }, "*");
-        return;
-      }
-
-      // Product link click from InlineHTML iframe
-      if (e.data?.type === "shop-assist-open-url" && typeof e.data.url === "string") {
-        const raw = e.data.url.trim();
-        try {
-          const parsed = new URL(raw);
-          if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-            const productName = e.data.productName
-              || parsed.pathname.split("/").pop()?.replace(/-/g, " ")
-              || "";
-
-            if (embed) {
-              // Send to embed.js: save pending product + navigate host page
-              window.parent.postMessage({
-                type: "shop-assist-navigate",
-                url: parsed.href,
-                pendingProduct: productName ? { productName, url: parsed.href } : undefined,
-              }, "*");
-            } else {
-              // Standalone: navigate directly
-              window.location.href = parsed.href;
-            }
-          }
-        } catch { /* ignore invalid URLs */ }
-        return;
-      }
-
-      // Quick-reply prompt from InlineHTML iframe
-      if (e.data?.type === "shop-assist-send-prompt" && e.data.text) {
-        if (
-          e.data.text === "__dismiss__" ||
-          e.data.text.toLowerCase().includes("just browsing") ||
-          e.data.text.toLowerCase().includes("not today") ||
-          e.data.text.toLowerCase().includes("no thanks") ||
-          e.data.text.toLowerCase().includes("just looking")
-        ) {
-          setIsOpen(false);
-          return;
-        }
-        handleSendRef.current?.(e.data.text);
-      }
     }
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
@@ -808,6 +856,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       setStorageNamespace(standaloneTenantKey);
       configureMessageStorageNamespace(standaloneTenantKey);
       configureProfileStorageNamespace(standaloneTenantKey);
+      configureFavouritesStorageNamespace(standaloneTenantKey);
       setTenantKey(standaloneTenantKey);
       setStorageNamespaceState(standaloneTenantKey);
       const standaloneSessionId = getBrowserSessionId();
@@ -847,9 +896,12 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setWidgetConfig(nextConfig);
         initFromBridge(bootstrap.session.messages || null, false);
         initProfileFromBridge(bootstrap.session.visitorProfile || null, false);
+        initFavouritesFromBridge(null, false);
+        setFavourites(loadFavourites());
 
         const saved = loadMessages();
         setMessages(saved && saved.length > 0 ? saved.map(chatMessageToUi) : [buildWelcomeUi(nextConfig.branding)]);
+        setSuggestions(bootstrap.session.suggestions ?? []);
 
         const ctx = getPageContext();
         if (ctx) setPageContext(ctx);
@@ -872,6 +924,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setWidgetConfig(nextConfig);
         initFromBridge(null, false);
         initProfileFromBridge(null, false);
+        initFavouritesFromBridge(null, false);
+        setFavourites(loadFavourites());
         const saved = loadMessages();
         const restored = saved && saved.length > 0 ? saved.map(chatMessageToUi) : [buildWelcomeUi(nextConfig.branding)];
         setMessages([
@@ -923,13 +977,14 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         hostOrigin: hostOriginRef.current,
         messages: displayMessages,
         visitorProfile: visitorProfileRef.current,
+        suggestions,
       }).catch((error) => {
         console.error("[widget] session sync failed:", error);
       });
     }, 300);
 
     return () => clearTimeout(timeout);
-  }, [displayMessages, loaded, sessionId, tenantKey, tenantToken, visitorProfile]);
+  }, [displayMessages, suggestions, loaded, sessionId, tenantKey, tenantToken, visitorProfile]);
 
   const restoreSession = useCallback(
     async (nextSessionId: string) => {
@@ -942,6 +997,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       setBootstrapError("");
       setTenantToken(bootstrap.tenantToken);
       setSessionId(nextSessionId);
+      setSelectedProducts([]);
       if (embed && typeof window !== "undefined" && window.parent !== window) {
         window.parent.postMessage(
           { type: "shop-assist-set-session-id", sessionId: nextSessionId },
@@ -959,6 +1015,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           ? bootstrap.session.messages.map(chatMessageToUi)
           : [buildWelcomeUi(brandingRef.current)]
       );
+      setSuggestions(bootstrap.session.suggestions ?? []);
       setVisitorProfile(bootstrap.session.visitorProfile || recordVisit({
         productName: pageContextRef.current?.productName,
         category: pageContextRef.current?.category,
@@ -985,6 +1042,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
             hostOrigin: hostOriginRef.current,
             messages: messages.map(uiMessageToChatMessage),
             visitorProfile: visitorProfileRef.current,
+            suggestions: suggestionsRef.current,
           });
         }
         await restoreSession(nextSessionId);
@@ -1041,76 +1099,33 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     [embed, refreshHistorySessions, setMessages, welcomeUi]
   );
 
-  // Scroll to bottom when widget opens or chat is restored.
-  // Product card iframes resize asynchronously (images load, content expands),
-  // so a single scrollTop assignment lands "in the middle". We use a
-  // ResizeObserver to keep snapping to the bottom while the container grows,
-  // for a short window after the widget opens.
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    function toBottom() {
-      if (container) container.scrollTop = container.scrollHeight;
-    }
-
-    // Initial scrolls at staggered times to catch late-loading iframes
-    requestAnimationFrame(toBottom);
-    const timers = [
-      setTimeout(toBottom, 100),
-      setTimeout(toBottom, 300),
-      setTimeout(toBottom, 800),
-    ];
-
-    // Watch for content size changes during the first ~1.5s
-    let pinToBottom = true;
-    const observer = new ResizeObserver(() => {
-      if (pinToBottom) toBottom();
-    });
-    observer.observe(container);
-    const stopPin = setTimeout(() => { pinToBottom = false; }, 1500);
-
-    return () => {
-      timers.forEach(clearTimeout);
-      clearTimeout(stopPin);
-      observer.disconnect();
-    };
-  }, [isOpen, loaded]);
-
-  // Scroll so the top of the new AI response sits at 20% from top (leaving 80% for reading)
-  const lastAssistantMessageId = messages.findLast((m) => m.role === "assistant")?.id;
-  const prevAssistantIdRef = useRef<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (!lastAssistantMessageId || lastAssistantMessageId === prevAssistantIdRef.current) return;
-    // A brand-new assistant message appeared (the ID check above prevents
-    // re-firing on subsequent streaming chunks of the same message). Scroll
-    // to it regardless of whether it came from useChat.sendMessage, a
-    // proactive transport.sendMessages call, or a direct setMessages inject.
-    prevAssistantIdRef.current = lastAssistantMessageId;
-
-    requestAnimationFrame(() => {
-      const el = lastAssistantRef.current;
-      if (!el) return;
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, [lastAssistantMessageId]);
-
-  const consumeAssistantStream = useCallback(async (stream: ReadableStream<UIMessageChunk>) => {
-    const assistantId = generateId();
+  const readAssistantStream = useCallback(async (stream: ReadableStream<UIMessageChunk>) => {
+    let latestMessage: UIMessage | null = null;
     try {
       for await (const uiMessage of readUIMessageStream({ stream })) {
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== assistantId),
-          { ...uiMessage, id: assistantId },
-        ]);
+        latestMessage = uiMessage;
       }
+      return latestMessage;
     } catch {
-      setMessages((prev) => [
-        ...prev.filter((m) => m.id !== assistantId),
-        {
+      return null;
+    }
+  }, []);
+
+  const consumeAssistantStream = useCallback(
+    async (stream: ReadableStream<UIMessageChunk>) => {
+      const assistantId = generateId();
+      let latestMessage: UIMessage | null = null;
+      try {
+        for await (const uiMessage of readUIMessageStream({ stream })) {
+          latestMessage = { ...uiMessage, id: assistantId };
+          setMessages((prev) => [
+            ...prev.filter((m) => m.id !== assistantId),
+            latestMessage as UIMessage,
+          ]);
+        }
+        return latestMessage;
+      } catch {
+        const fallbackMessage: UIMessage = {
           id: assistantId,
           role: "assistant",
           parts: [
@@ -1119,10 +1134,16 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
               text: "Sorry, I ran into an issue connecting. Please try again.",
             },
           ],
-        },
-      ]);
-    }
-  }, [setMessages]);
+        };
+        setMessages((prev) => [
+          ...prev.filter((m) => m.id !== assistantId),
+          fallbackMessage,
+        ]);
+        return fallbackMessage;
+      }
+    },
+    [setMessages]
+  );
 
   // Generate personalized greeting for returning visitors when widget opens
   const generateReturningGreeting = useCallback(async () => {
@@ -1282,11 +1303,28 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         messages: messages,
         abortSignal: new AbortController().signal,
       });
-      await consumeAssistantStream(chunkStream);
+      const interjection = await readAssistantStream(chunkStream);
+      if (!interjection) return;
+
+      const interjectionMessage: UIMessage = {
+        ...interjection,
+        id: createInterjectionMessageId(interjection.id),
+      };
+      setMessages((prev) => [
+        ...prev.filter((message) => !isInterjectionMessage(message)),
+        interjectionMessage,
+      ]);
+
+      const text = stripStageTag(getTextFromUIMessage(interjectionMessage)).trim();
+      const parsed = text ? parseAssistantMarkup(text) : null;
+      if (parsed?.prose && !isOpenRef.current) {
+        setInterjectionContent(parsed);
+        setShowInterjection(true);
+      }
     } catch {
       /* swallow */
     }
-  }, [transport, messages, gatedFire, consumeAssistantStream]);
+  }, [transport, messages, gatedFire, readAssistantStream]);
 
   // State 4: Greet on fresh session. For returning customers with prior chat
   // history, the greeting is APPENDED (history stays). For new customers with
@@ -1370,6 +1408,24 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   useEffect(() => { triggerContextualRef.current = triggerContextual; }, [triggerContextual]);
   useEffect(() => { triggerReengagementRef.current = triggerReengagement; }, [triggerReengagement]);
   useEffect(() => { triggerInterjectionRef.current = triggerInterjection; }, [triggerInterjection]);
+  useEffect(() => {
+    if (embed || !loaded) return;
+    if (isInterjectionDismissed(getScopedStorageKey(INTERJECTION_DISMISSED_KEY))) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (isOpenRef.current) return;
+      const type = pickInterjectionType({
+        pageContext: pageContextRef.current,
+        messages: messagesRef.current,
+        browsingHistory: browsingHistoryRef.current,
+      });
+      void triggerInterjectionRef.current?.(type);
+    }, STANDALONE_INTERJECTION_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [embed, loaded]);
   useEffect(() => { triggerNewSessionGreetingRef.current = triggerNewSessionGreeting; }, [triggerNewSessionGreeting]);
   useEffect(() => { triggerUpsellRef.current = triggerUpsell; }, [triggerUpsell]);
   useEffect(() => { scheduleContextualForPdpRef.current = scheduleContextualForPdp; }, [scheduleContextualForPdp]);
@@ -1420,6 +1476,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, []);
 
   const handleOpen = useCallback(() => {
+    setShowInterjection(false);
+    setInterjectionContent(null);
     setIsOpen(true);
     if (
       visitorProfile &&
@@ -1440,6 +1498,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     const nextSessionId = createBrowserSessionId();
     clearMessages();
     setMessages([welcomeUi]);
+    setSelectedProducts([]);
+    setSuggestions([]);
     setHumanMode(false);
     setSessionId(nextSessionId);
     if (embed && typeof window !== "undefined" && window.parent !== window) {
@@ -1621,9 +1681,92 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         return;
       }
 
+      setSuggestions([]);
       await sendMessage({ text: text.trim() });
     },
     [sendMessage, isStreaming, humanMode, triggerHandoff, setMessages, embed, proactive]
+  );
+
+  const handleInterjectionAction = useCallback(
+    (prompt: string) => {
+      setShowInterjection(false);
+      setInterjectionContent(null);
+      setMessages((prev) =>
+        prev.filter((message) => !isInterjectionMessage(message))
+      );
+      setIsOpen(true);
+      void handleSend(prompt);
+    },
+    [handleSend, setMessages]
+  );
+
+  const toggleCompareSelection = useCallback((product: ProductCard) => {
+    const productKey = product.productKey || product.sku || product.title || "";
+    if (!productKey) return;
+
+    setSelectedProducts((current) =>
+      current.some(
+        (entry) => (entry.productKey || entry.sku || entry.title) === productKey
+      )
+        ? current.filter(
+            (entry) => (entry.productKey || entry.sku || entry.title) !== productKey
+          )
+        : [...current, { ...product, productKey }]
+    );
+  }, []);
+
+  const compareSelectedProducts = useCallback(async () => {
+    if (selectedProducts.length < 2 || isStreaming || humanMode || !tenantTokenRef.current) {
+      return;
+    }
+
+    const compactProducts = selectedProducts.map((product) => ({
+      title: product.title || "Catalog product",
+      category: product.category || "",
+      brand: product.brand || "",
+      size: product.size || "",
+      salePrice: product.salePrice || "",
+      regularPrice: product.regularPrice || "",
+      image: product.image || "",
+      link: product.link || "",
+      sku: product.sku || "",
+      summary: product.summary || "",
+    }));
+    const productNames = compactProducts.map(
+      (product) => product.title || "selected product"
+    );
+
+    const now = Date.now();
+    lastActivityAtRef.current = now;
+    isIdleRef.current = false;
+    reengagementFiredRef.current = false;
+    lastUserMsgAtRef.current = now;
+    proactive.markUserActivity();
+    setIsNewSessionPhase(false);
+
+    setSuggestions([]);
+    setSelectedProducts([]);
+    await sendMessage(
+      { text: `Compare these products: ${productNames.join(" & ")}` },
+      {
+        body: {
+          compareRequest: {
+            shopperGoal:
+              "Compare shortlisted products side by side before choosing.",
+            products: compactProducts,
+          },
+        },
+      }
+    );
+  }, [humanMode, isStreaming, proactive, selectedProducts, sendMessage]);
+
+  const selectedProductKeys = selectedProducts
+    .map((product) => product.productKey || product.sku || product.title || "")
+    .filter(Boolean);
+
+  const favouriteProductKeys = useMemo(
+    () => favourites.map((product) => product.productKey).filter(Boolean),
+    [favourites]
   );
 
   useEffect(() => {
@@ -1645,29 +1788,87 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     <div style={widgetThemeStyle}>
       {/* Toggle button — Shopping Assistant pill */}
       {!isOpen && (
-        <button
-          onClick={handleOpen}
-          className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
-          style={{
-            backgroundColor: "var(--widget-surface)",
-            color: "var(--widget-text)",
-            border: "1px solid var(--widget-border)",
-            boxShadow: "var(--widget-shadow)",
-          }}
-          aria-label={`Open ${widgetConfig.branding.launcherLabel}`}
-        >
-          <WidgetAvatar
-            size={32}
-            branding={widgetConfig.branding}
-            theme={widgetConfig.theme}
-          />
-          <span
-            className="text-sm font-semibold"
-            style={{ color: "var(--widget-text)" }}
+        <>
+          {showInterjection && interjectionContent?.prose ? (
+            <div
+              role="status"
+              className={`interjection-enter fixed bottom-[88px] z-50 max-w-[min(320px,calc(100vw-48px))] rounded-2xl px-5 py-4 text-[15px] leading-relaxed shadow-[var(--widget-shadow)] sm:bottom-[96px] ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
+              style={{
+                backgroundColor: "var(--widget-surface)",
+                color: "var(--widget-text)",
+                border: "1px solid var(--widget-border)",
+              }}
+            >
+              <button
+                type="button"
+                className="w-full text-left"
+                onClick={handleOpen}
+              >
+                <MessageResponse
+                  className="streamdown-content text-[15px] leading-relaxed"
+                  mode="static"
+                  linkSafety={{ enabled: false }}
+                >
+                  {interjectionContent.prose}
+                </MessageResponse>
+              </button>
+              {interjectionContent.actions.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {interjectionContent.actions.map((action) => (
+                    <Button
+                      key={`${action.label}-${action.prompt}`}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-auto min-h-8 whitespace-normal rounded-full px-4 py-2 text-xs"
+                      onClick={() => handleInterjectionAction(action.prompt)}
+                    >
+                      {action.label}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInterjection(false);
+                  setInterjectionContent(null);
+                  setMessages((prev) =>
+                    prev.filter((message) => !isInterjectionMessage(message))
+                  );
+                  dismissInterjection(getScopedStorageKey(INTERJECTION_DISMISSED_KEY));
+                }}
+                className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--widget-surface)] text-[var(--widget-text-muted)] shadow-md transition-colors hover:text-[var(--widget-text)]"
+                aria-label="Dismiss message"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : null}
+          <button
+            onClick={handleOpen}
+            className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
+            style={{
+              backgroundColor: "var(--widget-surface)",
+              color: "var(--widget-text)",
+              border: "1px solid var(--widget-border)",
+              boxShadow: "var(--widget-shadow)",
+            }}
+            aria-label={`Open ${widgetConfig.branding.launcherLabel}`}
           >
-            {widgetConfig.branding.launcherLabel}
-          </span>
-        </button>
+            <WidgetAvatar
+              size={32}
+              branding={widgetConfig.branding}
+              theme={widgetConfig.theme}
+            />
+            <span
+              className="text-sm font-semibold"
+              style={{ color: "var(--widget-text)" }}
+            >
+              {widgetConfig.branding.launcherLabel}
+            </span>
+          </button>
+        </>
       )}
 
       {isOpen && (
@@ -1681,7 +1882,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           />
 
           <div
-            className={`widget-enter fixed bottom-0 z-50 flex h-[min(820px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[100vw] flex-col overflow-hidden rounded-t-[28px] shadow-2xl sm:bottom-6 sm:h-[760px] sm:w-[560px] sm:rounded-2xl lg:w-[640px] ${panelPositionClass} ${embed ? "pointer-events-auto" : ""}`}
+            className={`widget-enter fixed bottom-0 z-50 flex h-[min(860px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[100vw] flex-col overflow-hidden rounded-t-[28px] shadow-2xl sm:bottom-6 sm:h-[800px] sm:w-[640px] sm:rounded-2xl lg:w-[720px] ${panelPositionClass} ${embed ? "pointer-events-auto" : ""}`}
             style={{
               border: "1px solid var(--widget-border)",
               backgroundColor: "var(--widget-surface)",
@@ -1694,6 +1895,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
               onRefresh={handleRefresh}
               onToggleHistory={() => (showHistory ? closeHistory() : openHistory())}
               isHistoryOpen={showHistory}
+              onToggleFavourites={() =>
+                showFavourites ? closeFavourites() : openFavourites()
+              }
+              isFavouritesOpen={showFavourites}
+              favouriteCount={favourites.length}
               onShare={handleShare}
               branding={widgetConfig.branding}
               theme={widgetConfig.theme}
@@ -1704,19 +1910,56 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                 (message) => message.role === "user" || message.role === "assistant"
               )}
               isStreaming={isStreaming}
-              messagesEndRef={messagesEndRef}
-              lastAssistantRef={lastAssistantRef}
-              scrollContainerRef={scrollContainerRef}
               branding={widgetConfig.branding}
               theme={widgetConfig.theme}
               onToolOptionSelect={({ toolCallId, answers }) => {
+                setSuggestions([]);
                 addToolOutput({
                   tool: "ask_user_question",
                   toolCallId,
                   output: { answers },
                 });
               }}
+              suggestions={suggestions}
+              onSuggestionSelect={(suggestion) => {
+                setSuggestions([]);
+                void handleSend(suggestion);
+              }}
+              selectedProductKeys={selectedProductKeys}
+              favouriteProductKeys={favouriteProductKeys}
+              onToggleCompareSelection={toggleCompareSelection}
+              onToggleFavourite={toggleFavourite}
             />
+
+            {selectedProducts.length > 0 ? (
+              <div className="border-t border-[var(--widget-border)] bg-[var(--widget-surface)] px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-[var(--widget-text)]">
+                    {selectedProducts.length} product
+                    {selectedProducts.length === 1 ? "" : "s"} selected
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProducts([])}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--widget-border)] px-3 text-sm font-medium text-[var(--widget-text)] transition-colors hover:bg-[var(--widget-surface-alt)]"
+                    >
+                      <X size={15} />
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedProducts.length < 2 || isStreaming || humanMode}
+                      onClick={compareSelectedProducts}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--widget-accent)] px-3 text-sm font-semibold text-[var(--widget-accent-text)] transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <ArrowRightLeft size={15} />
+                      Compare
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <ChatInput
               onSend={handleSend}
@@ -1724,7 +1967,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
               isStreaming={isStreaming}
               humanMode={humanMode}
               onAbort={stop}
-              onChipClick={handleSend}
               branding={widgetConfig.branding}
             />
 
@@ -1755,6 +1997,32 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                       closeHistory();
                     }}
                     onClose={closeHistory}
+                  />
+                </div>
+              </>
+            )}
+
+            {isFavouritesMounted && (
+              <>
+                <div
+                  className={
+                    isFavouritesClosing
+                      ? "history-backdrop-exit absolute inset-0 z-10 bg-black/20"
+                      : "history-backdrop-enter absolute inset-0 z-10 bg-black/20"
+                  }
+                  onClick={closeFavourites}
+                />
+                <div
+                  className={
+                    isFavouritesClosing
+                      ? "history-sidebar-exit absolute bottom-0 right-0 top-0 z-20 w-[280px] border-l border-[var(--widget-border)] bg-[var(--widget-surface)] shadow-lg"
+                      : "history-sidebar-enter absolute bottom-0 right-0 top-0 z-20 w-[280px] border-l border-[var(--widget-border)] bg-[var(--widget-surface)] shadow-lg"
+                  }
+                >
+                  <ChatFavourites
+                    favourites={favourites}
+                    onRemoveFavourite={removeFavourite}
+                    onClose={closeFavourites}
                   />
                 </div>
               </>

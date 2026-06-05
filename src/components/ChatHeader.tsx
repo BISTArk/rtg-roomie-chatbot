@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Clock3, Minus, RefreshCw, Share2 } from "lucide-react";
+import { Clock3, Heart, Minus, RefreshCw, Share2 } from "lucide-react";
 import { WidgetAvatar } from "./WidgetAvatar";
 import type { WidgetBranding, WidgetTheme } from "@/lib/widget-config";
 
@@ -10,6 +10,9 @@ export function ChatHeader({
   onRefresh,
   onToggleHistory,
   isHistoryOpen,
+  onToggleFavourites,
+  isFavouritesOpen,
+  favouriteCount,
   onShare,
   branding,
   theme,
@@ -18,6 +21,9 @@ export function ChatHeader({
   onRefresh: () => void;
   onToggleHistory: () => void;
   isHistoryOpen: boolean;
+  onToggleFavourites: () => void;
+  isFavouritesOpen: boolean;
+  favouriteCount: number;
   onShare: () => void;
   branding: WidgetBranding;
   theme: WidgetTheme;
@@ -87,6 +93,29 @@ export function ChatHeader({
           }}
         >
           <RefreshCw size={16} />
+        </button>
+        <button
+          onClick={onToggleFavourites}
+          className={`relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--widget-danger)] transition-colors ${
+            isFavouritesOpen ? "bg-[var(--widget-danger)]/10" : ""
+          }`}
+          aria-label="Favourites"
+          title="Favourites"
+          onMouseEnter={(e) => {
+            if (isFavouritesOpen) return;
+            e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
+          }}
+          onMouseLeave={(e) => {
+            if (isFavouritesOpen) return;
+            e.currentTarget.style.backgroundColor = "transparent";
+          }}
+        >
+          <Heart size={16} className="fill-[var(--widget-danger)]" />
+          {favouriteCount > 0 ? (
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--widget-danger)] px-1 text-[10px] font-semibold text-white">
+              {favouriteCount > 9 ? "9+" : favouriteCount}
+            </span>
+          ) : null}
         </button>
         <button
           onClick={onToggleHistory}

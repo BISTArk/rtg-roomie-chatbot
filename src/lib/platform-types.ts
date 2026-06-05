@@ -72,6 +72,7 @@ export interface SessionState {
   sessionId: string;
   messages: PersistedChatMessage[];
   visitorProfile: VisitorProfile | null;
+  suggestions?: string[];
   updatedAt?: string;
 }
 

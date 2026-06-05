@@ -35,9 +35,15 @@ import { chatTools } from "@/tools";
 
 export const maxDuration = 60;
 
+type CompareRequest = {
+  shopperGoal?: string;
+  products?: unknown[];
+};
+
 type ChatRequestBody = {
   id?: string;
   messages: UIMessage[];
+  compareRequest?: CompareRequest;
   type?: "chat" | "returning" | "summarize" | "reengagement" | "contextual" | "new-session" | "interjection" | "upsell";
   interjectionType?: "compare" | "inform" | "guide" | "social" | "resume";
   pageContext?: PageContext;
@@ -184,6 +190,17 @@ function createMissingCatalogResponse(messages: UIMessage[]): Response {
 
 function normalizeUsageCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+}
+
+function buildCompareRequestPrompt(compareRequest?: CompareRequest): string {
+  if (!compareRequest?.products?.length) return "";
+
+  return [
+    "",
+    "Pending client-side compare request:",
+    "Write one short shopper-facing lead-in, then call compare_tool with these exact products. Include a recommendation when one option is clearly the best fit. The tool UI contains the full comparison and recommendation, so do not write any text after the tool returns.",
+    JSON.stringify(compareRequest),
+  ].join("\n");
 }
 
 function buildTrackedStreamResponse(input: {
@@ -345,6 +362,7 @@ export async function POST(request: Request) {
 
   const {
     messages = [],
+    compareRequest,
     type,
     pageContext: rawPageContext,
     browsingHistory,
@@ -815,16 +833,21 @@ IMPORTANT context to weave in:
       return createMissingCatalogResponse(messages);
     }
 
-    const systemPrompt = buildSystemPrompt(retrieval.catalogData, currentStage, {
-      systemPrompt: tenant.systemPrompt,
-      skillPrompt: tenant.skillPrompts[currentStage],
-      visitorProfile: visitorProfile ?? undefined,
-      pageContext: pageContext ?? undefined,
-      customerLocation,
-      accessoryData: retrieval.accessoryData,
-    });
+    const systemPrompt = [
+      buildSystemPrompt(retrieval.catalogData, currentStage, {
+        systemPrompt: tenant.systemPrompt,
+        skillPrompt: tenant.skillPrompts[currentStage],
+        visitorProfile: visitorProfile ?? undefined,
+        pageContext: pageContext ?? undefined,
+        customerLocation,
+        accessoryData: retrieval.accessoryData,
+      }),
+      buildCompareRequestPrompt(compareRequest),
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-      const sanitized = sanitizeForModel(messages, branding);
+    const sanitized = sanitizeForModel(messages, branding);
     const modelMessages = await convertToModelMessages(sanitized);
 
     return buildTrackedStreamResponse({

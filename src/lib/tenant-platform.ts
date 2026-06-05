@@ -796,6 +796,7 @@ export async function saveSessionState(input: {
   lastPageUrl?: string | null;
   messages: PersistedChatMessage[];
   visitorProfile?: VisitorProfile | null;
+  suggestions?: string[] | null;
 }): Promise<void> {
   if (!hasDatabase()) return;
 
@@ -806,6 +807,7 @@ export async function saveSessionState(input: {
     ...input,
     messages: sanitizedMessages,
     visitorProfile: sanitizedProfile,
+    suggestions: input.suggestions,
   });
 }
 
@@ -1297,6 +1299,7 @@ export async function bootstrapTenantSession(input: {
       sessionId: input.sessionId,
       messages: persisted.messages,
       visitorProfile: persisted.visitorProfile,
+      suggestions: persisted.suggestions ?? [],
       updatedAt: persisted.updatedAt,
     },
   };

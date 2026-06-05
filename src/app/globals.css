@@ -19,7 +19,7 @@
   --widget-success: #2f7d32;
   --widget-danger: #c94a4a;
   --widget-focus: #1f1f1f;
-  --widget-font-family: Jost, Inter, Helvetica Neue, Arial, sans-serif;
+  --widget-font-family: Inter, Helvetica Neue, Arial, sans-serif;
   --widget-radius: 24px;
   --widget-shadow: 0 18px 50px rgba(17, 24, 39, 0.18);
   --background: oklch(1 0 0);
@@ -119,6 +119,10 @@ body.embed-chat-root {
 
   .widget-enter {
     animation: widgetOpen 250ms ease-out;
+  }
+
+  .interjection-enter {
+    animation: bubbleIn 250ms ease-out;
   }
 }
 

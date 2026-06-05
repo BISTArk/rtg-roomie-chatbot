@@ -26,10 +26,6 @@ const recommendationSchema = z.object({
   reason: z
     .string()
     .describe("Short shopper-facing explanation for why this is the recommended choice."),
-  label: z
-    .string()
-    .optional()
-    .describe("Optional heading for the recommendation card. Defaults to 'Our Recommendation'."),
 });
 
 type CompareProduct = z.infer<typeof compareProductSchema>;
@@ -117,7 +113,7 @@ function buildRows(products: CompareProduct[]) {
 
 export const compareTool = tool({
   description:
-    "Compare 2 to 4 specific catalog products that have already been shortlisted. Use this after recommendations when the shopper wants side-by-side tradeoffs. Include recommendation when one option is the strongest fit.",
+    "Compare 2 to 4 specific catalog products that have already been shortlisted. Use this after product_search when the shopper wants side-by-side tradeoffs. Include recommendation when one option is the strongest fit.",
   inputSchema: z.object({
     shopperGoal: z
       .string()
@@ -169,7 +165,6 @@ export const compareTool = tool({
       highlights,
       recommendation: recommendation
         ? {
-            label: recommendation.label || "Our Recommendation",
             reason: recommendation.reason,
             productTitle: recommendedProduct?.title || recommendation.productTitle || "",
             productSku: recommendedProduct?.sku || recommendation.productSku || "",

@@ -50,6 +50,14 @@ function buildSessionPreview(messages: PersistedChatMessage[]): string {
   return lastMessage.text.slice(0, 80) + (lastMessage.text.length > 80 ? "..." : "");
 }
 
+function sanitizeSuggestions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
 export async function ensureSessionRecord(
   client: PoolClient,
   input: {
@@ -100,8 +108,9 @@ export async function loadAiSdkSessionState(
     const sessionResult = await client.query<{
       id: string;
       updated_at: string;
+      suggestions_json: string[] | null;
     }>(
-      `SELECT id, updated_at
+      `SELECT id, updated_at, suggestions_json
        FROM sessions_v2
        WHERE tenant_id = $1 AND client_session_id = $2
        LIMIT 1`,
@@ -140,6 +149,7 @@ export async function loadAiSdkSessionState(
       sessionId: clientSessionId,
       messages,
       visitorProfile: profileResult.rows[0]?.profile_json ?? null,
+      suggestions: sanitizeSuggestions(session?.suggestions_json),
       updatedAt: session?.updated_at,
     };
   });
@@ -152,11 +162,16 @@ export async function saveAiSdkSessionState(input: {
   lastPageUrl?: string | null;
   messages: PersistedChatMessage[];
   visitorProfile?: VisitorProfile | null;
+  suggestions?: string[] | null;
 }): Promise<void> {
   if (!hasDatabase()) return;
   await ensurePlatformSchema();
 
   const sanitizedMessages = sanitizeMessages(input.messages);
+  const sanitizedSuggestions =
+    input.suggestions === undefined
+      ? undefined
+      : sanitizeSuggestions(input.suggestions);
   const title = buildSessionTitle(sanitizedMessages);
   const previewText = buildSessionPreview(sanitizedMessages);
 
@@ -171,6 +186,15 @@ export async function saveAiSdkSessionState(input: {
         title,
         previewText,
       });
+
+      if (sanitizedSuggestions !== undefined) {
+        await client.query(
+          `UPDATE sessions_v2
+           SET suggestions_json = $1::jsonb, updated_at = NOW()
+           WHERE id = $2`,
+          [JSON.stringify(sanitizedSuggestions), sessionRowId]
+        );
+      }
 
       await client.query(`DELETE FROM messages_v2 WHERE session_id = $1`, [sessionRowId]);
 

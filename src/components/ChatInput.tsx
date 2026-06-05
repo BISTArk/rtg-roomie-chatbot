@@ -9,7 +9,6 @@ export function ChatInput({
   isStreaming,
   humanMode,
   onAbort,
-  onChipClick,
   branding,
 }: {
   onSend: (text: string) => void;
@@ -17,11 +16,9 @@ export function ChatInput({
   isStreaming: boolean;
   humanMode?: boolean;
   onAbort: () => void | Promise<void>;
-  onChipClick: (text: string) => void;
   branding: WidgetBranding;
 }) {
   const [input, setInput] = useState("");
-  const [showChips, setShowChips] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -34,7 +31,9 @@ export function ChatInput({
     if (!input.trim() || disabled) return;
     onSend(input.trim());
     setInput("");
-    setShowChips(false);
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -42,11 +41,6 @@ export function ChatInput({
       e.preventDefault();
       handleSubmit();
     }
-  };
-
-  const handleChipClick = (chip: string) => {
-    onChipClick(chip);
-    setShowChips(false);
   };
 
   return (
@@ -66,36 +60,6 @@ export function ChatInput({
           }}
         >
           {branding.humanModeBannerText}
-        </div>
-      )}
-
-      {showChips && !humanMode && branding.quickChips.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-4 pt-3">
-          {branding.quickChips.map((chip) => (
-            <button
-              key={chip}
-              onClick={() => handleChipClick(chip)}
-              disabled={disabled}
-              className="rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-              style={{
-                borderColor: "var(--widget-border)",
-                color: "var(--widget-text)",
-                backgroundColor: "var(--widget-surface)",
-              }}
-              onMouseEnter={(e) => {
-                if (!disabled) {
-                  e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
-                  e.currentTarget.style.borderColor = "var(--widget-accent)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "var(--widget-surface)";
-                e.currentTarget.style.borderColor = "var(--widget-border)";
-              }}
-            >
-              {chip}
-            </button>
-          ))}
         </div>
       )}
 
@@ -120,7 +84,7 @@ export function ChatInput({
           onInput={(e) => {
             const target = e.target as HTMLTextAreaElement;
             target.style.height = "auto";
-            target.style.height = Math.min(target.scrollHeight, 100) + "px";
+            target.style.height = `${Math.min(target.scrollHeight, 100)}px`;
           }}
         />
         {isStreaming ? (
