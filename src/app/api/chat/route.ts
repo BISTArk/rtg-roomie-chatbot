@@ -27,6 +27,7 @@ import {
   resolveCatalogMode,
 } from "@/lib/catalog-retrieval";
 import { inferStage, stripStageTag } from "@/lib/stage-tag";
+import { stripUnresolvedToolParts } from "@/lib/message-tools";
 import { isComplaintMessage } from "@/lib/complaint-detection";
 import { getWelcomeMessage } from "@/lib/widget-config";
 import type { WidgetBranding } from "@/lib/widget-config";
@@ -100,7 +101,7 @@ function sanitizeForModel(
   branding?: Partial<WidgetBranding>
 ): Omit<UIMessage, "id">[] {
   const hasWelcome = messages.some((m) => m.id === "welcome");
-  const cleaned = messages
+  const cleaned = stripUnresolvedToolParts(messages)
     .filter((m) => m.id !== "welcome")
     .map((m) => {
       const { id, ...rest } = m;

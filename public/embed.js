@@ -578,38 +578,46 @@
       "position:fixed",
       "bottom:0",
       getEdgeStyle(placement),
-      "width:300px",
+      placement === "bottom-left" ? "right:auto" : "left:auto",
+      "width:min(300px,calc(100vw - 16px))",
       "height:90px",
+      "max-width:calc(100vw - 16px)",
       "border:0",
       "z-index:2147483647",
       "background:transparent",
       "transition:width 0.3s ease, height 0.3s ease",
+      "overflow:hidden",
     ].join(";");
 
     var PEEK_STYLE = [
       "position:fixed",
       "bottom:0",
       getEdgeStyle(placement),
-      "width:min(360px,100vw)",
+      placement === "bottom-left" ? "right:auto" : "left:auto",
+      "width:min(360px,calc(100vw - 16px))",
       "height:240px",
+      "max-width:calc(100vw - 16px)",
       "border:0",
       "z-index:2147483647",
       "background:transparent",
       "transition:width 0.3s ease, height 0.3s ease",
+      "overflow:hidden",
     ].join(";");
 
     var OPEN_STYLE = [
       "position:fixed",
       "bottom:0",
       getEdgeStyle(placement),
-      "width:min(640px,100vw)",
-      "height:min(800px,100vh)",
-      "max-width:100vw",
-      "max-height:100vh",
+      placement === "bottom-left" ? "right:auto" : "left:auto",
+      "width:min(640px,calc(100vw - 16px))",
+      "height:min(800px,calc(100vh - 16px))",
+      "max-width:calc(100vw - 16px)",
+      "max-height:calc(100vh - 16px)",
       "border:0",
       "z-index:2147483647",
       "background:transparent",
       "transition:width 0.3s ease, height 0.3s ease",
+      "overflow:hidden",
     ].join(";");
 
     // Restore previous widget open/closed state so the iframe loads at the
@@ -664,6 +672,7 @@
           hostOrigin: window.location.origin,
           theme: widgetConfig.theme,
           branding: widgetConfig.branding,
+          placement: placement,
         });
         // Only fire State 4 greeting on the first tab's first load — not
         // on subsequent loads in the same session.

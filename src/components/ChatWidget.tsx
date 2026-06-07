@@ -85,6 +85,7 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import type { SessionHistoryItem, TenantBootstrap } from "@/lib/platform-types";
 import type { SelectableProductCard } from "@/lib/product-types";
+import { hasPendingToolCalls, stripUnresolvedToolParts } from "@/lib/message-tools";
 
 export type ChatMessage = PersistedChatMessage;
 
@@ -315,6 +316,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const panelPositionClass = isLeftPlacement
     ? "left-0 right-auto sm:left-4 sm:right-auto"
     : "right-0 left-auto sm:right-6 sm:left-auto";
+  const embedPanelClass =
+    "inset-x-0 bottom-0 w-full max-w-full sm:bottom-0 sm:w-full sm:max-w-full";
+  const embedLauncherClass = isLeftPlacement
+    ? "left-2 right-auto sm:left-3"
+    : "right-2 left-auto sm:right-3";
 
   const handleSendRef = useRef<(text: string) => void>(undefined);
   const visitorProfileRef = useRef(visitorProfile);
@@ -494,13 +500,14 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           const extras = requestExtrasRef.current;
           requestExtrasRef.current = null;
           const ctx = pageContextRef.current || getPageContext();
+          const cleanedMessages = stripUnresolvedToolParts(messages);
           return {
             headers: {
               "x-tenant-token": tenantTokenRef.current,
             },
             body: {
               id,
-              messages,
+              messages: cleanedMessages,
               ...(body ?? {}),
               tenantKey: tenantKeyRef.current,
               sessionId: sessionIdRef.current || id,
@@ -613,6 +620,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
             {
               theme: data.theme,
               branding: data.branding,
+              placement: data.placement,
             }
           );
           setWidgetConfig(nextConfig);
@@ -627,10 +635,19 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           suppressReturningRef.current = data.suppressReturning === true;
 
           const saved = loadMessages();
+          const isFreshSession =
+            data.isNewSession && !data.pendingProduct && !data.isSharedChat;
           if (saved && saved.length > 0) {
-            setMessages(saved.map(chatMessageToUi));
+            const restored = stripUnresolvedToolParts(saved.map(chatMessageToUi));
+            messagesRef.current = restored;
+            setMessages(restored);
+          } else if (isFreshSession) {
+            messagesRef.current = [];
+            setMessages([]);
           } else {
-            setMessages([buildWelcomeUi(nextConfig.branding)]);
+            const welcome = [buildWelcomeUi(nextConfig.branding)];
+            messagesRef.current = welcome;
+            setMessages(welcome);
           }
           setSuggestions(bootstrap.session.suggestions ?? []);
 
@@ -651,6 +668,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           const nextConfig = resolveWidgetConfig({
             theme: data.theme,
             branding: data.branding,
+            placement: data.placement,
           });
           setWidgetConfig(nextConfig);
           initFromBridge(data.chatMessages || null, true);
@@ -703,14 +721,12 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           setIsOpen(true);
         }
 
-        // State 4: Fresh session (all tabs were closed). ALWAYS fire — whether
-        // there's prior chat history or not. triggerNewSessionGreeting picks
-        // the right path internally (returning vs new-session) and appends
-        // without wiping existing history.
+        // State 4: Fresh session (all tabs were closed). Fire immediately so
+        // the AI greeting replaces the static welcome on first paint.
         if (data.isNewSession && !data.pendingProduct && !data.isSharedChat) {
-          setTimeout(() => {
+          queueMicrotask(() => {
             triggerNewSessionGreetingRef.current?.();
-          }, 2000);
+          });
         }
 
         // State 2 on full page load: Shopify themes typically do full page
@@ -1363,8 +1379,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     // State 4 is a one-shot init greeting; don't mark the 15s debounce so
     // State 2's contextual can still fire on PDP landings.
     if (!gatedFire("new-session", false)) return;
+    if (!tenantTokenRef.current) return;
     const profile = loadVisitorProfile();
-    const hasPriorChat = messages.filter((m) => m.id !== "welcome").length > 0;
+    const currentMessages = messagesRef.current;
+    const hasPriorChat =
+      currentMessages.filter((m) => m.id !== "welcome").length > 0;
     // Post-refresh: the customer explicitly asked for a clean slate. Force
     // the first-timer "new-session" path (generic intro) instead of
     // "returning" (welcome-back with history), even though visitCount > 1.
@@ -1389,7 +1408,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       // When there's prior chat, send the full history to the API so the
       // returning skill can reference the last topic. When no history, send
       // empty array and the skill uses the generic new-session intro.
-      const historyForApi = hasPriorChat ? messages : [];
+      const historyForApi = hasPriorChat
+        ? stripUnresolvedToolParts(currentMessages)
+        : [];
       const chunkStream = await transport.sendMessages({
         trigger: "submit-message",
         chatId: CHAT_ID,
@@ -1401,7 +1422,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     } catch {
       if (!hasPriorChat) setMessages([welcomeUi]);
     }
-  }, [transport, messages, setMessages, gatedFire, welcomeUi, consumeAssistantStream]);
+  }, [transport, setMessages, gatedFire, welcomeUi, consumeAssistantStream]);
 
   // Wire up the refs so the message handler (stable across renders) can
   // call the latest version of these callbacks.
@@ -1644,6 +1665,12 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     async (text: string) => {
       if (!text.trim() || isStreaming || humanMode || !tenantTokenRef.current) return;
 
+      if (hasPendingToolCalls(messagesRef.current)) {
+        const cleaned = stripUnresolvedToolParts(messagesRef.current);
+        messagesRef.current = cleaned;
+        setMessages(cleaned);
+      }
+
       // User typing = CONVERSATION mode. Reset all proactive timers/counters.
       const now = Date.now();
       lastActivityAtRef.current = now;
@@ -1847,7 +1874,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           ) : null}
           <button
             onClick={handleOpen}
-            className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
+            className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${embed ? embedLauncherClass : launcherPositionClass} ${embed ? "pointer-events-auto max-w-[calc(100%-16px)]" : ""}`}
             style={{
               backgroundColor: "var(--widget-surface)",
               color: "var(--widget-text)",
@@ -1882,7 +1909,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           />
 
           <div
-            className={`widget-enter fixed bottom-0 z-50 flex h-[min(860px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[100vw] flex-col overflow-hidden rounded-t-[28px] shadow-2xl sm:bottom-6 sm:h-[800px] sm:w-[640px] sm:rounded-2xl lg:w-[720px] ${panelPositionClass} ${embed ? "pointer-events-auto" : ""}`}
+            className={`widget-enter fixed z-50 flex flex-col overflow-hidden shadow-2xl ${
+              embed
+                ? `${embedPanelClass} h-full max-h-full rounded-none sm:rounded-none`
+                : `bottom-0 h-[min(860px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[100vw] rounded-t-[28px] sm:bottom-6 sm:h-[800px] sm:w-[640px] sm:rounded-2xl lg:w-[720px] ${panelPositionClass}`
+            } ${embed ? "pointer-events-auto" : ""}`}
             style={{
               border: "1px solid var(--widget-border)",
               backgroundColor: "var(--widget-surface)",
