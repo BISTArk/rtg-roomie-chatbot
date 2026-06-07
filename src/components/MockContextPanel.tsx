@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  clearInterjectionDismissed,
+  INTERJECTION_DISMISSED_KEY,
+  INTERJECTION_TYPES,
+  postInterjectionTrigger,
+  type InterjectionType,
+} from "@/lib/interjection";
+import { getScopedStorageKey } from "@/lib/browser-session";
 
 const PRESETS = {
   "First visit (no context)": {},
@@ -85,6 +93,11 @@ export function MockContextPanel() {
     // Clear visitor profile cookie
     document.cookie = "shop_assist_visitor_profile=;path=/;max-age=0";
     document.cookie = "shop_assist_proactive_dismissed=;path=/;max-age=0";
+    clearInterjectionDismissed(getScopedStorageKey(INTERJECTION_DISMISSED_KEY));
+  };
+
+  const triggerInterjection = (type: InterjectionType) => {
+    postInterjectionTrigger(type);
   };
 
   return (
@@ -145,6 +158,40 @@ export function MockContextPanel() {
           widget
         </p>
       )}
+
+      <div
+        className="mt-4 border-t pt-4"
+        style={{ borderColor: "var(--widget-border)" }}
+      >
+        <h3
+          className="mb-2 text-sm font-semibold"
+          style={{ color: "var(--widget-text)" }}
+        >
+          Trigger interjection
+        </h3>
+        <p className="mb-3 text-xs" style={{ color: "var(--widget-text-muted)" }}>
+          Close the chat widget first. A peek bubble should appear above the
+          launcher after the API responds. Standalone demo also auto-fires one
+          after 8s when the chat stays closed.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {INTERJECTION_TYPES.map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => triggerInterjection(type)}
+              className="rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors"
+              style={{
+                borderColor: "var(--widget-border)",
+                color: "var(--widget-text)",
+                backgroundColor: "var(--widget-surface)",
+              }}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -63,7 +63,7 @@ export const DEFAULT_WIDGET_THEME: WidgetTheme = {
   success: "#2f7d32",
   danger: "#c94a4a",
   focus: "#1f1f1f",
-  fontFamily: "Jost, Inter, Helvetica Neue, Arial, sans-serif",
+  fontFamily: "Inter, Helvetica Neue, Arial, sans-serif",
   radius: "24px",
   shadow: "0 18px 50px rgba(17, 24, 39, 0.18)",
 };

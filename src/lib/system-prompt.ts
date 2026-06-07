@@ -36,7 +36,7 @@ export interface BrowsingHistoryEntry {
 export interface PageContext {
   page: "pdp" | "category" | "cart" | "homepage" | "search" | "unknown";
   productName?: string;
-  /** Shopify variant id (numeric) when the embed runs on a Shopify storefront — use with addToCart() in HTML. */
+  /** Shopify variant id (numeric) when the embed runs on a Shopify storefront. */
   productVariantId?: number;
   productSku?: string;
   productPrice?: string;
@@ -89,6 +89,23 @@ export function getDefaultSystemPrompt(): string {
 
 export function getDefaultSkillPrompt(stage: ConversationStage): string {
   return loadFile(`skills/${stage}.md`);
+}
+
+function stripLegacyHtmlInstructions(prompt: string): string {
+  return prompt
+    .replace(/```html[\s\S]*?```/gi, "\n(Use the available UI tools instead of HTML.)\n")
+    .replace(
+      /\(three backticks\)html[\s\S]*?\(three backticks\)/gi,
+      "\n(Use the available UI tools instead of HTML.)\n"
+    )
+    .replace(/\bHTML\s+(tiles?|blocks?|cards?|code|output)\b/gi, "tool UI")
+    .replace(/\bfenced HTML\b/gi, "tool UI")
+    .replace(/\bsendPrompt\([^)]*\)/g, "a normal follow-up prompt")
+    .replace(/\baddToCart\([^)]*\)/g, "the product card action")
+    .replace(/\bcheckout\(\)/g, "checkout")
+    .replace(/\b\.pill\b/g, "quick option")
+    .replace(/\b\.chip\b/g, "quick option")
+    .replace(/\b\.card\b/g, "product card");
 }
 
 /**
@@ -198,179 +215,64 @@ function getTimeAgo(isoDate: string): string {
   }
 }
 
-// HTML output rules live in code to avoid triple-backtick conflicts in markdown
-// Lean ruleset used for proactive stages (contextual/reengagement/
-// interjection/new-session). No product cards — the skills explicitly
-// forbid them and the heavy ruleset would deadlock the model.
-const PROACTIVE_HTML_INSTRUCTIONS = `
-## Output Rules for Proactive Messages
-
-This is a short proactive message. Keep it brief per the active skill's word limit.
-
-**DO NOT render product cards.** Reference products by name in plain text
-(or **bold**) only. Product pages and cards are handled elsewhere.
-
-### CRITICAL: HTML MUST BE IN A CODE FENCE
-
-Your response structure is:
-1. One short sentence of prose (plain markdown)
-2. A fenced HTML block with 2–3 action tiles
-
-The HTML block **MUST** be wrapped in a markdown code fence that starts with three backticks followed by the word \`html\` on its own line, and ends with three backticks on their own line. Without the fence, the buttons render as escaped plain text and are NOT clickable.
-
-**Correct format (copy this structure exactly):**
-
-\`\`\`html
-<div class="flex-wrap">
-<button class="btn-cart" onclick="addToCart(47913101749386)">🛒 Add to cart</button>
-<button class="pill" onclick="sendPrompt('Compare with others')">⚖️ Compare</button>
-<button class="pill" onclick="sendPrompt('Tell me more')">👀 Tell me more</button>
-</div>
-\`\`\`
-
-**Incorrect (NEVER do this — buttons won't work):**
-
-\\<div class="flex-wrap"\\>
-  \\<button ...\\>Add to cart\\</button\\>
-\\</div\\>
-
-### Available JS helpers
-
-- \`sendPrompt(text)\` — sends the text as a user message into the chat
-- \`addToCart(variantId)\` — **Shopify only**, adds the product to the Shopify cart (numeric variant id from page context)
-- \`checkout()\` — **Shopify only**, sends the user to \`/checkout\`
-- \`toggleSelect(el, value)\` — for multi-select pills (not usually needed here)
-
-### Available CSS classes
-
-- \`.btn-cart\` — green Add-to-Cart button
-- \`.pill\` — blue rounded pill button (default for most tiles)
-- \`.flex-wrap\` — wrapping flex container for a row of buttons
-
-### Stage tag
-
-Always end your response with the stage tag on its own line — e.g. \`[STAGE:contextual]\` — so the conversation tracker can identify this turn.
-
-Your response MUST have actual prose content + the fenced HTML block before the stage tag. Never output the stage tag alone or HTML outside a code fence.
-`;
-
-const HTML_INSTRUCTIONS = `
-## CRITICAL: Interactive HTML Output Rules
-
-You MUST embed interactive HTML in your responses using fenced code blocks.
-The syntax is: three backticks followed by "html", then your HTML, then three closing backticks.
-
-These JavaScript helpers are pre-loaded:
-- sendPrompt(text) — immediately sends text as a user chat message
-- openProduct(url, productName) — opens the merchant product page in the same browser tab. ALWAYS pass the product name as the second argument.
-- addToCart(variantId, quantity) — **Shopify storefront embed only.** Adds a line item via the host store's \`/cart/add.js\`. \`variantId\` must be the numeric Shopify variant id (see page context). \`quantity\` defaults to 1.
-- checkout() — **Shopify storefront embed only.** Sends the customer to the host store's checkout (\`/checkout\`).
-- toggleSelect(element, value) — toggles a pill on/off for multi-select
-- submitSelected(prefix) — sends all toggled values as one message
-- toggleWishlist(button) — toggles the wishlist heart on a product card
-
-Pre-loaded CSS classes: .pill, .chip, .card, .card-top, .card-main, .card-footer, .card-title, .card-media, .card-image, .card-price, .card-actions-row, .card-buttons, .card-wishlist-btn, .btn-outline, .btn-cart, .btn-primary, .btn-secondary, .btn-submit, .grid-2, .flex-wrap
-
-Pre-loaded JavaScript: sendPrompt, toggleSelect, submitSelected, **openProduct(url, productName)** — use openProduct for real product page URLs from the catalog. ALWAYS pass the product name as the second argument for tracking.
-
-### Discovery Questions Use The Tool
-
-For discovery or guided-selling questions, do NOT render HTML pills or submit buttons.
-Call the \`ask_user_question\` tool instead.
-
-- Put the full discovery step in one tool call.
-- Ask 1 to 3 questions total in that tool call.
-- Each question needs a short \`header\`, the shopper-facing \`question\`, and 2 to 4 \`options\`.
-- Set \`multiSelect: true\` only when the shopper should be able to pick more than one option for that question.
-- After the tool returns answers, continue naturally and move toward recommendations.
-
-### Product Comparison Uses The Tool
-
-When the shopper wants to compare 2 to 4 specific products, call the \`compare_tool\`.
-
-- Pass the exact shortlisted products you are comparing.
-- Include a short \`shopperGoal\` tied to what matters to them.
-- Include a \`recommendation\` when one option is clearly the best fit.
-- The tool UI renders the side-by-side comparison, so keep surrounding prose brief and do not recreate the table in markdown.
-
-### ABSOLUTE RULE: Product Cards
-
-EVERY TIME you mention, recommend, or discuss a specific mattress product, you MUST render it as an HTML product card. NEVER describe a product in plain text. Non-negotiable.
-
-**Catalog columns you MUST copy exactly for each product (same row):**
-- **Image 1** — full https URL for the hero image (required in every card).
-- **Product Link** — full https URL for the PDP (required for "View product" and image click).
-- **Shopify Variant ID** — numeric Shopify variant id (required for the Add to Cart button — each product row has its own).
-- Sale Price, Regular Price, Theme, Mattress Type, Mattress Size, etc. — use as shown in CATALOG_DATA.
-
-Product card format (replace placeholders with real values from that product's catalog row):
-
-THREE_BACKTICKS_html
-<div class="card">
-<div class="card-top">
-<div class="card-media" onclick='openProduct("PASTE_PRODUCT_LINK_URL_HERE", "PRODUCT NAME")' title="View product details">
-<img class="card-image" src="PASTE_IMAGE_1_URL_HERE" alt="PRODUCT NAME" loading="lazy" />
-<button type="button" class="card-wishlist-btn" aria-label="Add to wishlist" onclick="event.stopPropagation(); toggleWishlist(this)"></button>
-</div>
-<div class="card-main">
-<div class="card-title">PRODUCT NAME</div>
-<div class="card-actions-row">
-<div class="card-price">$X,XXX</div>
-<div class="card-buttons">
-<button type="button" class="btn-outline btn-compare" onclick="sendPrompt('Compare PRODUCT NAME with the others')">Compare</button>
-<button type="button" class="btn-outline" onclick='openProduct("PASTE_PRODUCT_LINK_URL_HERE", "PRODUCT NAME")'>View Product</button>
-<button type="button" class="btn-cart" onclick="addToCart(PASTE_SHOPIFY_VARIANT_ID_FROM_THIS_PRODUCTS_ROW)">Add to Cart</button>
-</div>
-</div>
-</div>
-</div>
-<div class="card-footer"><strong>Why it fits:</strong> One line about why this fits their needs.</div>
-</div>
-THREE_BACKTICKS
-
-- Use this exact structure and class names — the host styles the layout (image left, actions right, "Why it fits" footer).
-- **View Product**, clicking the **image**, and the wishlist control stay in the card-media and card-main sections as shown; image click still calls **openProduct** with the exact **Product Link** URL and product name.
-- **Compare** must use **sendPrompt** with a message that names the product (e.g. \`Compare PRODUCT NAME with the others\`).
-- **Add to Cart** is MANDATORY on every card. Use **addToCart(NUMERIC_VARIANT_ID)** from that row's **Shopify Variant ID**. Each card uses its own variant id — never reuse across products.
-- If a catalog row has NO **Shopify Variant ID**, use **openProduct("PRODUCT_LINK_URL", "PRODUCT NAME")** on the Add to Cart button instead. NEVER use sendPrompt on Add to Cart.
-- Put the one-line fit reason only in the card-footer block after **Why it fits:** — not in a separate paragraph or tag row.
-- Use the exact **Image 1** URL in the img src (optional **Image 2** only if you add a second img).
-- For onclick handlers, use single quotes on the outside and double quotes around URLs inside openProduct(...) so URLs stay intact.
-
-Each product = its own separate card in its own HTML code block.
-
-### ABSOLUTE RULE: Post-Product Action Bar
-
-After showing ALL product cards, you MUST show this action bar as a SEPARATE HTML code block. All 4 options always appear:
-
-THREE_BACKTICKS_html
-<div style="margin-top:4px">
-<p style="font-size:13px;margin-bottom:6px;font-weight:500">What would you like to do?</p>
-<div class="flex-wrap">
-<button class="pill" onclick="sendPrompt('Tell me more about TOP_PICK_NAME')">👀 More on TOP_PICK</button>
-<button class="pill" onclick="sendPrompt('Compare all these options')">⚖️ Compare all options</button>
-<button class="pill" onclick="sendPrompt('Show me different options')">🔄 Other options</button>
-<button class="pill" onclick="sendPrompt('I want to refine my preferences')">🎯 Refine more</button>
-</div>
-</div>
-THREE_BACKTICKS
-
-Replace TOP_PICK_NAME and TOP_PICK with the actual product name. This action bar appears after EVERY product recommendation.
-
-### Post-Product Tiles
-
-After showing products, always end with tile-based follow-up:
-
-THREE_BACKTICKS_html
-<div class="flex-wrap">
-<button class="pill" onclick="sendPrompt('Tell me more about the top pick')">👀 More details</button>
-<button class="pill" onclick="sendPrompt('Show me different options')">🔄 Different options</button>
-<button class="pill" onclick="sendPrompt('Compare all these options')">⚖️ Compare all options</button>
-</div>
-THREE_BACKTICKS
-
-Output format: three backticks + html → HTML → three closing backticks. Products = ALWAYS cards. Tiles = ALWAYS multi-select with Submit (except sleep position and post-product actions).
-`.replaceAll("THREE_BACKTICKS_html", "```html").replaceAll("THREE_BACKTICKS", "```");
+const UI_INSTRUCTIONS = [
+  "## CRITICAL: UI Output Rules",
+  "",
+  "Do NOT write fenced HTML, HTML product cards, HTML chips, inline buttons, or JavaScript handlers in chat responses.",
+  "",
+  "Use tools for interactive UI:",
+  "- Discovery and guided-selling questions -> `ask_user_question`",
+  "- Product recommendation cards -> `product_search`",
+  "- Product comparisons -> `compare_tool`",
+  "",
+  "Plain assistant text should be concise markdown only. Never use fenced HTML blocks.",
+  "",
+  "### Discovery Questions Use The Tool",
+  "",
+  "For discovery or guided-selling questions, do NOT render HTML pills, chips, submit buttons, or multi-select HTML.",
+  "Call the `ask_user_question` tool instead.",
+  "",
+  "- Put the full discovery step in one tool call.",
+  "- Ask 1 to 3 questions total in that tool call.",
+  "- Each question needs a short `header`, the shopper-facing `question`, and 2 to 4 `options`.",
+  "- Set `multiSelect: true` only when the shopper should be able to pick more than one option for that question.",
+  "- If you need one more preference after prior answers, call `ask_user_question` again. Do not create HTML fallback controls.",
+  "- After the tool returns answers, continue naturally and move toward recommendations.",
+  "",
+  "### Product Comparison Uses The Tool",
+  "",
+  "When the shopper wants to compare 2 to 4 specific products, call the `compare_tool`.",
+  "",
+  "- Pass the exact shortlisted products you are comparing.",
+  "- Include a short `shopperGoal` tied to what matters to them.",
+  "- Include a `recommendation` when one option is clearly the best fit.",
+  "- The tool UI renders the side-by-side comparison, so keep surrounding prose brief and do not recreate the table in markdown.",
+  "",
+  "### Product Recommendations Use The Tool",
+  "",
+  "EVERY TIME you recommend, mention, or discuss specific mattress products, call the `product_search` tool. Do not render product cards as HTML. The catalog has already been injected into your prompt; the tool is only the UI surface for showing product cards.",
+  "",
+  "- Choose products from the injected CATALOG_DATA yourself. There is no external lookup.",
+  "- Pass 1 to 6 exact products to `product_search.products`.",
+  "- Copy values from the same catalog row. Do not invent names, prices, links, images, SKUs, or variant IDs.",
+  "- Map catalog columns into product fields:",
+  "  - Product name/title -> `title`",
+  "  - Image 1 -> `image`",
+  "  - Product Link -> `link`",
+  "  - Shopify Variant ID -> `shopifyVariantId`",
+  "  - Sale Price -> `salePrice`",
+  "  - Regular Price -> `regularPrice`",
+  "  - Brand/Theme/vendor -> `brand` when available",
+  "  - Mattress Size -> `size`",
+  "  - Mattress Type/category -> `category`",
+  "  - One-line fit reason -> `summary`",
+  "- Write at most one short setup sentence before the tool call and one short follow-up question after it.",
+  "- If the shopper asks to compare the displayed products, use `compare_tool` with the same product objects.",
+  "",
+  "### Post-Product Follow-up",
+  "",
+  "After `product_search`, ask a brief natural-language follow-up. Do not create HTML action bars or HTML chips for product follow-up actions.",
+].join("\n");
 
 /** Render a compact CUSTOMER LOCATION block when any geo field is present.
  *  Returns "" when the location is entirely missing (localhost, preview,
@@ -415,7 +317,9 @@ export function buildSystemPrompt(
   );
 
   // Load stage-specific skill
-  const skill = options?.skillPrompt?.trim() || getDefaultSkillPrompt(stage);
+  const skill = stripLegacyHtmlInstructions(
+    options?.skillPrompt?.trim() || getDefaultSkillPrompt(stage)
+  );
 
   // Build human-readable context (always included when available)
   const contextNarrative = buildContextNarrative(
@@ -433,29 +337,8 @@ export function buildSystemPrompt(
     ? `\n\n---\n\n# INTERJECTION TYPE\n\nUse the "${options.interjectionType}" sub-template from the skill above.`
     : "";
 
-  // Proactive stages must NOT render product cards — their skills say so,
-  // but the heavy HTML_INSTRUCTIONS would contradict. Give them a lean
-  // tile-only instruction set instead. Note: `returning` is also included
-  // because a welcome-back greeting should never surprise-spawn a product
-  // card; it's a conversation-opening message, not a recommendation.
-  const PROACTIVE_STAGES = new Set<string>([
-    "contextual",
-    "reengagement",
-    "interjection",
-    "new-session",
-    "returning",
-    "upsell",
-    // complaint stage must use the lean ruleset — never product cards in
-    // a complaint response; just prose + action tiles.
-    "complaint",
-  ]);
-
-  const outputRules = PROACTIVE_STAGES.has(stage)
-    ? PROACTIVE_HTML_INSTRUCTIONS
-    : HTML_INSTRUCTIONS;
-
   const locationBlock = buildCustomerLocationBlock(options?.customerLocation);
 
-  // Combine: universal rules + current stage skill + context + accessory data + location + stage-appropriate output rules
-  return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}\n\n---\n\n${outputRules}`;
+  // Combine: universal rules + current stage skill + context + accessory data + location + output rules
+  return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}\n\n---\n\n${UI_INSTRUCTIONS}`;
 }

@@ -9,6 +9,7 @@ type SessionSyncRequest = {
   lastPageUrl?: string;
   messages?: PersistedChatMessage[];
   visitorProfile?: VisitorProfile | null;
+  suggestions?: string[] | null;
 };
 
 export async function POST(request: Request) {
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
       lastPageUrl: body.lastPageUrl,
       messages: body.messages ?? [],
       visitorProfile: body.visitorProfile ?? null,
+      suggestions: body.suggestions,
     });
 
     return Response.json({ ok: true });

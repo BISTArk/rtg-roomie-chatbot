@@ -26,6 +26,7 @@
     // the user sends their first message (then the iframe postMessages to
     // clear it). Persists across page navigations and sessions.
     SUPPRESS_RETURNING: "suppress_returning",
+    FAVOURITES: "favourites",
   };
   var MAX_HISTORY = 30;
   var MSG_CONTEXT = "shop-assist-page-context-update";
@@ -585,12 +586,24 @@
       "transition:width 0.3s ease, height 0.3s ease",
     ].join(";");
 
+    var PEEK_STYLE = [
+      "position:fixed",
+      "bottom:0",
+      getEdgeStyle(placement),
+      "width:min(360px,100vw)",
+      "height:240px",
+      "border:0",
+      "z-index:2147483647",
+      "background:transparent",
+      "transition:width 0.3s ease, height 0.3s ease",
+    ].join(";");
+
     var OPEN_STYLE = [
       "position:fixed",
       "bottom:0",
       getEdgeStyle(placement),
-      "width:min(440px,100vw)",
-      "height:min(720px,100vh)",
+      "width:min(640px,100vw)",
+      "height:min(800px,100vh)",
       "max-width:100vw",
       "max-height:100vh",
       "border:0",
@@ -603,9 +616,10 @@
     // right size (no flash of the small pill when the chat was open).
     var wasOpen = safeGet(scopedStorageKey(STORAGE.WIDGET_OPEN)) === "1";
     var renderReady = false;
+    var peekVisible = false;
 
     function getFrameStyle(open, visible) {
-      var style = open ? OPEN_STYLE : CLOSED_STYLE;
+      var style = open ? OPEN_STYLE : (peekVisible ? PEEK_STYLE : CLOSED_STYLE);
       if (visible) return style;
       return style + ";opacity:0;visibility:hidden;pointer-events:none";
     }
@@ -629,6 +643,7 @@
       var pending = safeJSON(safeGet(scopedStorageKey(STORAGE.PENDING)));
       var profile = getVisitorProfile();
       var history = getBrowsingHistory();
+      var favourites = safeJSON(safeGet(scopedStorageKey(STORAGE.FAVOURITES)));
 
       function sendInit(chatMessages, isSharedChat) {
         sendToIframe({
@@ -639,6 +654,7 @@
           browsingHistory: history,
           pendingProduct: pending,
           visitorProfile: profile,
+          favourites: Array.isArray(favourites) ? favourites : [],
           isSharedChat: !!isSharedChat,
           widgetOpen: wasOpen,
           isNewSession: isNewSession,
@@ -724,6 +740,12 @@
           }
           break;
 
+        case "shop-assist-save-favourites":
+          if (e.data.favourites) {
+            safeSet(scopedStorageKey(STORAGE.FAVOURITES), JSON.stringify(e.data.favourites));
+          }
+          break;
+
         case "shop-assist-clear-messages":
           safeRemove(scopedStorageKey(STORAGE.CHAT));
           break;
@@ -747,6 +769,7 @@
           break;
 
         case "shop-assist-widget-open":
+          peekVisible = false;
           iframe.setAttribute("style", getFrameStyle(true, renderReady));
           safeSet(scopedStorageKey(STORAGE.WIDGET_OPEN), "1");
           chatIsOpen = true;
@@ -765,6 +788,11 @@
           sessionStartedAt = Date.now();
           setSessionVal(scopedSessionKey("started_at"), String(sessionStartedAt));
           startState3();
+          break;
+
+        case "shop-assist-widget-peek":
+          peekVisible = !!e.data.visible && !chatIsOpen;
+          iframe.setAttribute("style", getFrameStyle(chatIsOpen, renderReady));
           break;
 
         case "shop-assist-add-to-cart": {

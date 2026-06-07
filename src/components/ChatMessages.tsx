@@ -1,39 +1,148 @@
 "use client";
 
 import type { UIMessage } from "ai";
-import React, { type RefObject, useMemo, useState } from "react";
-import { ArrowRightLeft, Check, ShoppingCart } from "lucide-react";
-import { Streamdown } from "streamdown";
+import React, { useState } from "react";
+import { ArrowRightLeft, BarChart3, Check, Heart, ShoppingCart } from "lucide-react";
 import "streamdown/styles.css";
-import { InlineHTML } from "./InlineHTML";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationRoot,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
 import { WidgetAvatar } from "./WidgetAvatar";
+import { parseAssistantMarkup } from "@/lib/assistant-html";
+import { chatQuickSuggestions } from "@/lib/chat-suggestions";
+import {
+  isInterjectionMessage,
+  shouldMergeAssistantMessages,
+  splitTransientAssistantMessages,
+} from "@/lib/interjection";
 import { stripStageTag } from "@/lib/stage-tag";
 import type { WidgetBranding, WidgetTheme } from "@/lib/widget-config";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { addProductToCart, openProductLink } from "@/lib/product-actions";
+import type {
+  ProductCard,
+  SelectableProductCard,
+} from "@/lib/product-types";
 import { cn } from "@/lib/utils";
+
+function ToolStatusMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <Card className="my-1 rounded-2xl border-[var(--widget-border)] bg-[var(--widget-assistant-bubble)] py-0 shadow-none">
+      <CardContent className="px-4 py-3 text-sm text-[var(--widget-text-muted)]">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
 
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-1 px-4 py-3">
-      <div
-        className="flex items-center gap-1 rounded-2xl rounded-bl-sm px-4 py-3"
-        style={{
-          backgroundColor: "var(--widget-surface)",
-          border: "1px solid var(--widget-border)",
-        }}
-      >
-        <div className="typing-dot h-2 w-2 rounded-full" />
-        <div className="typing-dot h-2 w-2 rounded-full" />
-        <div className="typing-dot h-2 w-2 rounded-full" />
-      </div>
+      <Card className="rounded-2xl rounded-bl-sm border-[var(--widget-border)] py-0 shadow-none">
+        <CardContent className="flex items-center gap-1.5 px-4 py-3">
+          <Skeleton className="size-2 rounded-full" />
+          <Skeleton className="size-2 rounded-full" />
+          <Skeleton className="size-2 rounded-full" />
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-interface Segment {
-  type: "text" | "html";
-  content: string;
+const suggestionButtonClassName =
+  "h-auto min-h-8 whitespace-normal rounded-full px-4 py-2 text-sm";
+
+function QuickSuggestions({
+  suggestions,
+  onSelect,
+  disabled,
+}: {
+  suggestions: string[];
+  onSelect: (suggestion: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex w-full flex-wrap justify-center gap-2.5">
+      {suggestions.map((suggestion) => (
+        <Button
+          key={suggestion}
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          className={suggestionButtonClassName}
+          onClick={() => onSelect(suggestion)}
+        >
+          {suggestion}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function NextQuestionSuggestions({
+  suggestions,
+  onSelect,
+}: {
+  suggestions: string[];
+  onSelect: (suggestion: string) => void;
+}) {
+  const validSuggestions = suggestions
+    .map((suggestion) => String(suggestion || "").trim())
+    .filter(Boolean);
+
+  if (!validSuggestions.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2 py-1">
+      {validSuggestions.map((suggestion) => (
+        <Button
+          key={suggestion}
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn(suggestionButtonClassName, "text-left")}
+          onClick={() => onSelect(suggestion)}
+        >
+          {suggestion}
+        </Button>
+      ))}
+    </div>
+  );
 }
 
 type AskQuestion = {
@@ -43,80 +152,22 @@ type AskQuestion = {
   options?: Array<{ label?: string; description?: string }>;
 };
 
-type ProductCard = {
-  title?: string;
-  category?: string;
-  brand?: string;
-  size?: string;
-  salePrice?: string;
-  regularPrice?: string;
-  image?: string;
-  link?: string;
-  sku?: string;
-  summary?: string;
-};
-
 type CompareToolRow = {
   label?: string;
   values?: string[];
 };
 
 type CompareRecommendation = {
-  label?: string;
   reason?: string;
   productTitle?: string;
   productSku?: string;
   link?: string;
 };
 
-function isProductCardHtml(html: string): boolean {
-  return /class=["'][^"']*\bcard\b/.test(html);
-}
-
-function isPillOnlyHtml(html: string): boolean {
-  const hasCard = /class=["'][^"']*\bcard\b/.test(html);
-  const hasPill = /class=["'][^"']*\bpill\b/.test(html);
-  return hasPill && !hasCard;
-}
-
 function cleanTextSegment(text: string): string {
   return text
     .replace(/^\s*What would you like to do\?\s*$/gim, "")
     .trim();
-}
-
-function parseSegments(rawText: string): Segment[] {
-  const text = stripStageTag(rawText);
-  const segments: Segment[] = [];
-  const htmlBlockRegex = /```html\s*\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = htmlBlockRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const before = cleanTextSegment(text.slice(lastIndex, match.index));
-      if (before) segments.push({ type: "text", content: before });
-    }
-    segments.push({ type: "html", content: match[1].trim() });
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    let remaining = text.slice(lastIndex);
-    const incompleteStart = remaining.indexOf("```html");
-    if (incompleteStart !== -1) {
-      remaining = remaining.slice(0, incompleteStart);
-    }
-    const cleaned = cleanTextSegment(remaining.trim());
-    if (cleaned) segments.push({ type: "text", content: cleaned });
-  }
-
-  if (segments.length === 0 && !text.includes("```html")) {
-    const cleaned = cleanTextSegment(text);
-    if (cleaned) segments.push({ type: "text", content: cleaned });
-  }
-
-  return segments;
 }
 
 function getTextPart(part: UIMessage["parts"][number]) {
@@ -130,7 +181,7 @@ function getToolOutput(part: UIMessage["parts"][number]) {
 
 function getToolInput(part: UIMessage["parts"][number]) {
   const candidate = part as unknown as { state?: string; input?: unknown };
-  return candidate.state === "input-available" || candidate.state === "output-available"
+  return candidate.state === "input-streaming" || candidate.state === "input-available" || candidate.state === "output-available"
     ? candidate.input
     : null;
 }
@@ -200,11 +251,7 @@ function AskUserQuestionTool({
     pendingMultiSelectState.index === currentIndex ? pendingMultiSelectState.values : [];
 
   if (!data) {
-    return (
-      <div className="my-2 rounded-2xl border border-[var(--widget-border)] bg-[var(--widget-assistant-bubble)] px-4 py-3 text-sm text-[var(--widget-text-muted)]">
-        Preparing questions...
-      </div>
-    );
+    return <ToolStatusMessage>Preparing questions...</ToolStatusMessage>;
   }
 
   function submitAllAnswers(nextAnswers: Record<number, string>) {
@@ -248,153 +295,312 @@ function AskUserQuestionTool({
   }
 
   return (
-    <div className="my-2 w-full rounded-2xl border border-[var(--widget-border)] bg-white px-4 py-4 shadow-sm">
-      {!isComplete ? (
-        <Progress
-          value={Math.max(12, ((currentIndex + 1) / askData.questions.length) * 100)}
-          className="mb-4"
-        />
-      ) : null}
+    <Card className="my-0 w-full rounded-2xl py-0 shadow-sm">
+      <CardContent className={cn("px-4", isComplete ? "py-2.5" : "py-3")}>
+        {!isComplete ? (
+          <Progress
+            value={Math.max(12, ((currentIndex + 1) / askData.questions.length) * 100)}
+            className="mb-4"
+          />
+        ) : null}
 
-      {askData.intro && currentIndex === 0 ? (
-        <p className="mb-4 text-sm leading-6 text-[var(--widget-text-muted)]">
-          {askData.intro}
-        </p>
-      ) : null}
+        {askData.intro && currentIndex === 0 ? (
+          <CardDescription className="mb-4 text-sm leading-6">
+            {askData.intro}
+          </CardDescription>
+        ) : null}
 
-      <div className="space-y-3">
-        {askData.questions.map((question, index) => {
-          const answer = submittedAnswers[index] || localAnswers[index] || "";
-          const isActive = index === currentIndex && !answer && !isComplete;
+        <div className="space-y-2">
+          {askData.questions.map((question, index) => {
+            const answer = submittedAnswers[index] || localAnswers[index] || "";
+            const isActive = index === currentIndex && !answer && !isComplete;
 
-          return (
-            <div
-              key={`${question.header}-${index}`}
-              className={
-                isActive ? "flex flex-col gap-3" : "grid grid-cols-[1fr_auto] items-center gap-3"
-              }
-            >
-              {isActive ? (
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--widget-surface-alt)] text-xs font-bold text-[var(--widget-accent)]">
-                      {index + 1}
-                    </span>
-                    <p className="truncate text-sm font-semibold text-[var(--widget-text-muted)]">
-                      {question.header || `Question ${index + 1}`}
-                    </p>
+            return (
+              <div
+                key={`${question.header}-${index}`}
+                className={
+                  isActive
+                    ? "flex flex-col gap-3"
+                    : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3"
+                }
+              >
+                {isActive ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge
+                        variant="secondary"
+                        className="size-5 shrink-0 justify-center rounded-full p-0 text-xs font-bold"
+                      >
+                        {index + 1}
+                      </Badge>
+                      <p className="truncate text-sm font-semibold text-muted-foreground">
+                        {question.header || `Question ${index + 1}`}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="shrink-0 px-3 py-1 text-xs font-semibold">
+                      {index + 1}/{askData.questions.length}
+                    </Badge>
                   </div>
-                  <span className="shrink-0 rounded-full bg-[var(--widget-surface-alt)] px-3 py-1 text-xs font-semibold text-[var(--widget-accent)]">
-                    {index + 1}/{askData.questions.length}
-                  </span>
-                </div>
-              ) : (
-                <>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--widget-surface-alt)] text-xs font-bold text-[var(--widget-accent)]">
-                      {answer ? <Check size={12} strokeWidth={3} /> : index + 1}
-                    </span>
-                    <p className="truncate text-sm font-semibold text-[var(--widget-text-muted)]">
-                      {question.header || `Question ${index + 1}`}
-                    </p>
-                  </div>
-                  {answer ? (
-                    <span className="justify-self-end rounded-full bg-[var(--widget-surface-alt)] px-3 py-1 text-xs font-semibold text-[var(--widget-accent)]">
-                      {answer}
-                    </span>
-                  ) : null}
-                </>
-              )}
+                ) : (
+                  <>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge
+                        variant="secondary"
+                        className="size-5 shrink-0 justify-center rounded-full p-0 text-xs font-bold"
+                      >
+                        {answer ? <Check size={12} strokeWidth={3} /> : index + 1}
+                      </Badge>
+                      <p className="truncate text-sm font-semibold text-muted-foreground">
+                        {question.header || `Question ${index + 1}`}
+                      </p>
+                    </div>
+                    {answer ? (
+                      <Badge
+                        variant="outline"
+                        className="h-auto shrink-0 justify-self-end whitespace-normal px-3 py-1 text-xs font-semibold leading-5"
+                      >
+                        {answer}
+                      </Badge>
+                    ) : null}
+                  </>
+                )}
 
-              {isActive ? (
-                <p className="text-sm font-semibold text-[var(--widget-text)]">
-                  {question.question}
-                </p>
-              ) : null}
+                {isActive ? (
+                  <CardTitle className="text-sm font-semibold">
+                    {question.question}
+                  </CardTitle>
+                ) : null}
 
-              {isActive ? (
-                <div className="flex flex-col gap-3">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {(question.options || []).map((option) => {
-                      const label = option.label?.trim() || "";
-                      if (!label) return null;
-                      const isSelected =
-                        isMultiSelect && index === currentIndex
-                          ? pendingMultiSelect.includes(label)
-                          : false;
+                {isActive ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {(question.options || []).map((option) => {
+                        const label = option.label?.trim() || "";
+                        if (!label) return null;
+                        const isSelected =
+                          isMultiSelect && index === currentIndex
+                            ? pendingMultiSelect.includes(label)
+                            : false;
 
-                      return (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() =>
-                            isMultiSelect && index === currentIndex
-                              ? toggleMultiSelectOption(label)
-                              : answerQuestion(label)
-                          }
-                          disabled={!toolCallId}
-                          className={cn(
-                            "min-h-16 rounded-xl border px-4 py-3 text-left transition-colors disabled:opacity-60",
-                            isSelected
-                              ? "border-[var(--widget-accent)] bg-[var(--widget-surface-alt)]"
-                              : "border-[var(--widget-border)] bg-white hover:bg-[var(--widget-surface-alt)]"
-                          )}
-                        >
-                          <span className="flex items-start gap-2">
-                            {isMultiSelect && index === currentIndex ? (
-                              <span
-                                className={cn(
-                                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]",
-                                  isSelected
-                                    ? "border-[var(--widget-accent)] bg-[var(--widget-accent)] text-white"
-                                    : "border-[var(--widget-border)] bg-white text-transparent"
-                                )}
-                              >
-                                <Check size={10} strokeWidth={3} />
-                              </span>
-                            ) : null}
-                            <span className="min-w-0">
-                              <span className="block text-sm font-semibold text-[var(--widget-text)]">
-                                {label}
-                              </span>
-                              {option.description ? (
-                                <span className="mt-1 block text-xs leading-5 text-[var(--widget-text-muted)]">
-                                  {option.description}
+                        return (
+                          <Button
+                            key={label}
+                            type="button"
+                            variant={isSelected ? "default" : "outline"}
+                            onClick={() =>
+                              isMultiSelect && index === currentIndex
+                                ? toggleMultiSelectOption(label)
+                                : answerQuestion(label)
+                            }
+                            disabled={!toolCallId}
+                            className="h-auto min-h-16 w-full justify-start whitespace-normal rounded-xl px-4 py-3 text-left"
+                          >
+                            <span className="flex items-start gap-2">
+                              {isMultiSelect && index === currentIndex ? (
+                                <span
+                                  className={cn(
+                                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]",
+                                    isSelected
+                                      ? "border-primary bg-primary text-primary-foreground"
+                                      : "border-border bg-background text-transparent"
+                                  )}
+                                >
+                                  <Check size={10} strokeWidth={3} />
                                 </span>
                               ) : null}
+                              <span className="min-w-0">
+                                <span className="block text-sm font-semibold">{label}</span>
+                                {option.description ? (
+                                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                                    {option.description}
+                                  </span>
+                                ) : null}
+                              </span>
                             </span>
-                          </span>
-                        </button>
-                      );
-                    })}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    {isMultiSelect && index === currentIndex ? (
+                      <Button
+                        type="button"
+                        onClick={confirmMultiSelect}
+                        disabled={!toolCallId || pendingMultiSelect.length === 0}
+                        className="self-end"
+                      >
+                        Continue
+                      </Button>
+                    ) : null}
                   </div>
-                  {isMultiSelect && index === currentIndex ? (
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProductSearchTool({
+  output,
+  selectedProductKeys,
+  favouriteProductKeys,
+  onToggleCompareSelection,
+  onToggleFavourite,
+}: {
+  output: unknown;
+  selectedProductKeys: string[];
+  favouriteProductKeys: string[];
+  onToggleCompareSelection: (product: SelectableProductCard) => void;
+  onToggleFavourite: (product: SelectableProductCard) => void;
+}) {
+  if (!output || typeof output !== "object") {
+    return <ToolStatusMessage>Searching catalog...</ToolStatusMessage>;
+  }
+
+  const data = output as {
+    products?: ProductCard[];
+  };
+  const products = Array.isArray(data.products) ? data.products : [];
+
+  if (!products.length) {
+    return <ToolStatusMessage>No matching catalog products found.</ToolStatusMessage>;
+  }
+
+  return (
+    <div className="my-0 space-y-2">
+      {products.map((product, index) => {
+        const productKey = product.sku || product.title || `${index}`;
+        const isSelected = selectedProductKeys.includes(productKey);
+        const isFavourited = favouriteProductKeys.includes(productKey);
+        const price = product.salePrice
+          ? `$${product.salePrice}`
+          : product.regularPrice
+            ? `$${product.regularPrice}`
+            : "Price unavailable";
+
+        return (
+          <Card
+            key={`${productKey}-${index}`}
+            className="overflow-hidden rounded-2xl py-0 shadow-none"
+          >
+            <CardContent className="grid grid-cols-[96px_minmax(0,1fr)] gap-4 p-4">
+              <div className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-xl bg-[var(--widget-surface-alt)]">
+                {product.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={product.image}
+                    alt={product.title || "Product"}
+                    className="h-full w-full rounded-xl object-contain"
+                    loading="lazy"
+                  />
+                ) : (
+                  <Skeleton className="h-full w-full rounded-xl" />
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={
+                    isFavourited ? "Remove from favourites" : "Add to favourites"
+                  }
+                  onClick={() =>
+                    onToggleFavourite({
+                      ...product,
+                      productKey,
+                    })
+                  }
+                  className={cn(
+                    "absolute -right-3 -top-3 rounded-full border border-[var(--widget-border)] bg-background shadow-sm",
+                    isFavourited
+                      ? "text-[var(--widget-danger)] hover:text-[var(--widget-danger)]"
+                      : "text-[var(--widget-text)]"
+                  )}
+                >
+                  <Heart
+                    size={16}
+                    className={
+                      isFavourited ? "fill-[var(--widget-danger)]" : undefined
+                    }
+                  />
+                </Button>
+              </div>
+
+              <div className="min-w-0">
+                <CardTitle className="line-clamp-2 text-sm leading-5">
+                  {product.title || "Catalog product"}
+                </CardTitle>
+                <CardDescription className="mt-1.5 line-clamp-1 text-xs uppercase">
+                  {[product.brand, product.size, product.category].filter(Boolean).join(" | ")}
+                </CardDescription>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <Badge
+                    variant="outline"
+                    className="border-0 px-0 text-xl font-bold leading-none text-destructive"
+                  >
+                    {price}
+                  </Badge>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     <Button
                       type="button"
-                      onClick={confirmMultiSelect}
-                      disabled={!toolCallId || pendingMultiSelect.length === 0}
-                      className="self-end"
+                      variant={isSelected ? "destructive" : "outline"}
+                      size="sm"
+                      onClick={() =>
+                        onToggleCompareSelection({
+                          ...product,
+                          productKey,
+                        })
+                      }
                     >
-                      Continue
+                      {isSelected ? <Check /> : <BarChart3 />}
+                      {isSelected ? "Selected" : "Compare"}
                     </Button>
-                  ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!product.link}
+                      onClick={() => openProductLink(product)}
+                    >
+                      View Product
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      disabled={!product.link && !product.shopifyVariantId}
+                      onClick={() => addProductToCart(product)}
+                    >
+                      <ShoppingCart />
+                      Add to Cart
+                    </Button>
+                  </div>
                 </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
+              </div>
+            </CardContent>
+
+            {product.summary ? (
+              <>
+                <Separator />
+                <CardContent className="px-4 py-2.5">
+                  <CardDescription className="text-xs leading-5">
+                    <span className="font-semibold text-foreground">Why it fits:</span>{" "}
+                    {product.summary}
+                  </CardDescription>
+                </CardContent>
+              </>
+            ) : null}
+          </Card>
+        );
+      })}
     </div>
   );
 }
 
 function CompareToolCard({ output }: { output: unknown }) {
   if (!output || typeof output !== "object") {
-    return (
-      <div className="my-2 rounded-2xl border border-[var(--widget-border)] bg-[var(--widget-assistant-bubble)] px-4 py-3 text-sm text-[var(--widget-text-muted)]">
-        Comparing selected products...
-      </div>
-    );
+    return <ToolStatusMessage>Comparing selected products...</ToolStatusMessage>;
   }
 
   const data = output as {
@@ -416,147 +622,132 @@ function CompareToolCard({ output }: { output: unknown }) {
   }
 
   return (
-    <div className="my-2 overflow-hidden rounded-2xl border border-[var(--widget-border)] bg-white shadow-sm">
-      <div className="border-b border-[var(--widget-border)] px-4 py-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-[var(--widget-text)]">
+    <Card className="my-0 overflow-hidden py-0 shadow-sm">
+      <CardHeader className="border-b px-4 py-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
           <ArrowRightLeft size={16} />
           Product comparison
-        </div>
+        </CardTitle>
         {data.shopperGoal ? (
-          <p className="mt-1.5 text-sm leading-5 text-[var(--widget-text-muted)]">
+          <CardDescription className="mt-1.5 text-sm leading-5">
             {data.shopperGoal}
-          </p>
+          </CardDescription>
         ) : null}
-      </div>
+      </CardHeader>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-[796px] border-collapse table-fixed">
-          <colgroup>
-            <col className="w-[136px]" />
+      <Table className="min-w-[796px] table-fixed">
+        <colgroup>
+          <col className="w-[136px]" />
+          {products.map((product, index) => (
+            <col key={`${product.sku || product.title || index}-col`} className="w-[220px]" />
+          ))}
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="bg-muted px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Attribute
+            </TableHead>
             {products.map((product, index) => (
-              <col key={`${product.sku || product.title || index}-col`} className="w-[220px]" />
+              <TableHead
+                key={`${product.sku || product.title || index}-header`}
+                className="px-3 py-3.5 text-center align-top whitespace-normal"
+              >
+                {product.image ? (
+                  <div className="mx-auto mb-3 flex size-16 items-center justify-center overflow-hidden rounded-lg border border-border bg-card p-1.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={product.image}
+                      alt={product.title || "Product"}
+                      className="h-full w-full object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+                ) : (
+                  <Skeleton className="mx-auto mb-3 size-16 rounded-lg" />
+                )}
+                <CardTitle className="line-clamp-3 text-[13px] leading-5">
+                  {product.title || "Catalog product"}
+                </CardTitle>
+                <CardDescription className="mt-1.5 text-[11px] leading-4">
+                  {[product.brand, product.size, product.category].filter(Boolean).join(" | ")}
+                </CardDescription>
+                {typeof data.highlights?.cheapestIndex === "number" &&
+                data.highlights.cheapestIndex === index ? (
+                  <Badge variant="secondary" className="mt-2 text-[10px]">
+                    Best price
+                  </Badge>
+                ) : null}
+                {typeof data.highlights?.priciestIndex === "number" &&
+                data.highlights.priciestIndex === index ? (
+                  <Badge variant="secondary" className="mt-2 text-[10px]">
+                    Premium pick
+                  </Badge>
+                ) : null}
+              </TableHead>
             ))}
-          </colgroup>
-          <thead>
-            <tr>
-              <th className="border border-[var(--widget-border)] bg-[var(--widget-surface-alt)] px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--widget-text-muted)]">
-                Attribute
-              </th>
-              {products.map((product, index) => (
-                <th
-                  key={`${product.sku || product.title || index}-header`}
-                  className="border border-[var(--widget-border)] bg-[var(--widget-surface)] px-3 py-3.5 text-center align-top text-[var(--widget-text)]"
-                >
-                  {product.image ? (
-                    <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg border border-[var(--widget-border)] bg-[var(--widget-surface)] p-1.5">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={product.image}
-                        alt={product.title || "Product"}
-                        className="h-full w-full object-contain"
-                        loading="lazy"
-                      />
-                    </div>
-                  ) : (
-                    <div className="mx-auto mb-3 h-16 w-16 rounded-lg border border-[var(--widget-border)] bg-[var(--widget-surface-alt)]" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row, rowIndex) => (
+            <TableRow key={`row-${row.label || rowIndex}`}>
+              <TableHead className="px-3 py-2.5 text-[13px] font-semibold whitespace-normal">
+                {row.label || "Attribute"}
+              </TableHead>
+              {products.map((product, productIndex) => (
+                <TableCell
+                  key={`${product.sku || product.title || productIndex}-${row.label || rowIndex}`}
+                  className={cn(
+                    "px-3 py-2.5 text-[13px] leading-5 align-top whitespace-normal",
+                    row.label === "Price" && "font-bold text-destructive",
+                    row.label === "Availability" && "font-medium text-foreground"
                   )}
-                  <div className="line-clamp-3 text-[13px] font-semibold leading-5">
-                    {product.title || "Catalog product"}
-                  </div>
-                  <div className="mt-1.5 text-[11px] leading-4 text-[var(--widget-text-muted)]">
-                    {[product.brand, product.size, product.category].filter(Boolean).join(" | ")}
-                  </div>
-                  {typeof data.highlights?.cheapestIndex === "number" &&
-                  data.highlights.cheapestIndex === index ? (
-                    <span className="mt-2 inline-flex rounded-full bg-[var(--widget-surface-alt)] px-2 py-0.5 text-[10px] font-semibold text-[var(--widget-text)]">
-                      Best price
-                    </span>
-                  ) : null}
-                  {typeof data.highlights?.priciestIndex === "number" &&
-                  data.highlights.priciestIndex === index ? (
-                    <span className="mt-2 inline-flex rounded-full bg-[var(--widget-surface-alt)] px-2 py-0.5 text-[10px] font-semibold text-[var(--widget-text)]">
-                      Premium pick
-                    </span>
-                  ) : null}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={`row-${row.label || rowIndex}`}>
-                <th className="border border-[var(--widget-border)] bg-[var(--widget-surface)] px-3 py-2.5 text-left text-[13px] font-semibold text-[var(--widget-text)]">
-                  {row.label || "Attribute"}
-                </th>
-                {products.map((product, productIndex) => (
-                  <td
-                    key={`${product.sku || product.title || productIndex}-${row.label || rowIndex}`}
-                    className={cn(
-                      "border border-[var(--widget-border)] bg-[var(--widget-surface)] px-3 py-2.5 text-[13px] leading-5 align-top",
-                      row.label === "Price"
-                        ? "font-bold text-[var(--widget-accent)]"
-                        : row.label === "Availability"
-                          ? "font-medium text-[var(--widget-text)]"
-                          : "text-[var(--widget-text-muted)]"
-                    )}
-                  >
-                    {row.label === "Availability" ? (
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full bg-[var(--widget-surface-alt)] px-2 py-0.5 text-[10px] font-semibold",
-                          row.values?.[productIndex] === "In Stock"
-                            ? "text-[var(--widget-text)]"
-                            : "text-[var(--widget-text-muted)]"
-                        )}
-                      >
-                        {row.values?.[productIndex] || "—"}
-                      </span>
-                    ) : (
-                      row.values?.[productIndex] || "—"
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))}
-
-            <tr>
-              <th className="border border-[var(--widget-border)] bg-[var(--widget-surface)] px-3 py-3 text-left text-[13px] font-semibold text-[var(--widget-text)]">
-                Actions
-              </th>
-              {products.map((product, index) => (
-                <td
-                  key={`${product.sku || product.title || index}-actions`}
-                  className="border border-[var(--widget-border)] bg-[var(--widget-surface)] px-3 py-3 align-top"
                 >
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    disabled={!product.link}
-                    onClick={() =>
-                      product.link
-                        ? window.open(product.link, "_blank", "noopener,noreferrer")
-                        : undefined
-                    }
-                    className="w-full"
-                  >
-                    <ShoppingCart size={16} />
-                    Add to Cart
-                  </Button>
-                </td>
+                  {row.label === "Availability" ? (
+                    <Badge
+                      variant={
+                        row.values?.[productIndex] === "In Stock" ? "success" : "secondary"
+                      }
+                      className="text-[10px]"
+                    >
+                      {row.values?.[productIndex] || "—"}
+                    </Badge>
+                  ) : (
+                    row.values?.[productIndex] || "—"
+                  )}
+                </TableCell>
               ))}
-            </tr>
-          </tbody>
-        </table>
-      </div>
+            </TableRow>
+          ))}
+
+          <TableRow>
+            <TableHead className="px-3 py-3 text-[13px] font-semibold">Actions</TableHead>
+            {products.map((product, index) => (
+              <TableCell key={`${product.sku || product.title || index}-actions`} className="px-3 py-3 align-top">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  disabled={!product.link && !product.shopifyVariantId}
+                  onClick={() => addProductToCart(product)}
+                  className="w-full"
+                >
+                  <ShoppingCart data-icon="inline-start" />
+                  Add to Cart
+                </Button>
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableBody>
+      </Table>
 
       {data.recommendation?.reason ? (
-        <div className="border-t border-[var(--widget-border)] bg-[var(--widget-surface-alt)] px-4 py-3">
-          <div className="space-y-2">
+        <>
+          <Separator />
+          <CardContent className="space-y-2 bg-accent px-4 py-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-[var(--widget-accent)]">
-                {data.recommendation.label || "Our Recommendation"}
-              </div>
+              <CardTitle className="text-base text-accent-foreground">
+                Our Recommendation
+              </CardTitle>
               <Button
                 type="button"
                 variant="outline"
@@ -574,17 +765,78 @@ function CompareToolCard({ output }: { output: unknown }) {
               </Button>
             </div>
             {data.recommendation.productTitle ? (
-              <div className="text-sm font-medium leading-5 text-[var(--widget-text)]">
+              <CardTitle className="text-sm font-medium leading-5">
                 {data.recommendation.productTitle}
-              </div>
+              </CardTitle>
             ) : null}
-            <p className="text-sm leading-6 text-[var(--widget-text-muted)]">
+            <CardDescription className="text-sm leading-6">
               {data.recommendation.reason}
-            </p>
-          </div>
-        </div>
+            </CardDescription>
+          </CardContent>
+        </>
       ) : null}
+    </Card>
+  );
+}
+
+function InterjectionMessageBubble({
+  message,
+  branding,
+  theme,
+  onPillSelect,
+}: {
+  message: UIMessage;
+  branding: WidgetBranding;
+  theme: WidgetTheme;
+  onPillSelect?: (prompt: string) => void;
+}) {
+  const text = message.parts.map(getTextPart).join("");
+  const parsed = parseAssistantMarkup(stripStageTag(text));
+  if (!parsed.prose && parsed.actions.length === 0) return null;
+
+  return (
+    <div className="chat-bubble-enter flex w-full flex-col gap-1.5">
+      <div className="flex items-center gap-2 pl-1">
+        <WidgetAvatar size={24} branding={branding} theme={theme} />
+        <Badge className="text-[12px] font-bold">{branding.assistantName}</Badge>
+      </div>
+      <Card className="rounded-2xl py-0 shadow-sm">
+        <CardContent className="space-y-2 px-4 py-3">
+          {parsed.prose ? (
+            <MessageResponse
+              className="streamdown-content text-sm"
+              mode="static"
+              linkSafety={{ enabled: false }}
+            >
+              {parsed.prose}
+            </MessageResponse>
+          ) : null}
+          {parsed.actions.length > 0 && onPillSelect ? (
+            <div className="flex flex-wrap gap-2">
+              {parsed.actions.map((action) => (
+                <Button
+                  key={`${action.label}-${action.prompt}`}
+                  type="button"
+                  variant="secondary"
+                  className={suggestionButtonClassName}
+                  onClick={() => onPillSelect(action.prompt)}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
     </div>
+  );
+}
+
+function isRenderableAssistantBubblePart(part: UIMessage["parts"][number]) {
+  return (
+    (part.type === "text" && part.text.trim().length > 0) ||
+    part.type === "tool-product_search" ||
+    part.type === "tool-compare_tool"
   );
 }
 
@@ -592,81 +844,132 @@ function MessageBubble({
   message,
   isLastAssistant,
   isStreaming,
-  lastAssistantRef,
   branding,
   theme,
   onToolOptionSelect,
+  selectedProductKeys,
+  favouriteProductKeys,
+  onToggleCompareSelection,
+  onToggleFavourite,
+  onPillSelect,
 }: {
   message: UIMessage;
   isLastAssistant: boolean;
   isStreaming: boolean;
-  lastAssistantRef?: React.RefObject<HTMLDivElement | null>;
   branding: WidgetBranding;
   theme: WidgetTheme;
   onToolOptionSelect: (selection: {
     toolCallId: string;
     answers: Array<{ header: string; question: string; answer: string }>;
   }) => void;
+  onPillSelect?: (prompt: string) => void;
+  selectedProductKeys: string[];
+  favouriteProductKeys: string[];
+  onToggleCompareSelection: (product: SelectableProductCard) => void;
+  onToggleFavourite: (product: SelectableProductCard) => void;
 }) {
   const isUser = message.role === "user";
   const text = message.parts.map(getTextPart).join("");
-  const questionToolParts = message.parts.filter(
-    (part) => part.type === "tool-ask_user_question"
-  );
-  const compareToolParts = message.parts.filter(
-    (part) => part.type === "tool-compare_tool"
-  );
+  const assistantBlocks: Array<
+    | { type: "bubble"; parts: UIMessage["parts"] }
+    | { type: "ask"; part: UIMessage["parts"][number]; index: number }
+  > = [];
+
+  if (!isUser) {
+    let currentParts: UIMessage["parts"] = [];
+
+    for (const [index, part] of message.parts.entries()) {
+      if (part.type === "tool-ask_user_question") {
+        if (currentParts.some(isRenderableAssistantBubblePart)) {
+          assistantBlocks.push({ type: "bubble", parts: currentParts });
+        }
+        currentParts = [];
+        assistantBlocks.push({ type: "ask", part, index });
+        continue;
+      }
+
+      currentParts.push(part);
+    }
+
+    if (currentParts.some(isRenderableAssistantBubblePart)) {
+      assistantBlocks.push({ type: "bubble", parts: currentParts });
+    }
+  }
 
   return (
-    <div
-      ref={!isUser && isLastAssistant ? lastAssistantRef : undefined}
-      className={`chat-bubble-enter flex flex-col ${isUser ? "items-end" : "items-start"} px-4 py-1.5`}
-      style={!isUser && isLastAssistant ? { scrollMarginTop: "12vh" } : undefined}
-    >
+    <div className="chat-bubble-enter flex w-full flex-col gap-1.5">
       {!isUser && (
-        <div className="mb-1 flex items-center gap-2 pl-1">
+        <div className="flex items-center gap-2 pl-1">
           <WidgetAvatar size={24} branding={branding} theme={theme} />
-          <span
-            className="text-[12px] font-bold"
-            style={{ color: "var(--widget-accent)" }}
-          >
-            {branding.assistantName}
-          </span>
+          <Badge className="text-[12px] font-bold">{branding.assistantName}</Badge>
         </div>
       )}
       {isUser ? (
-        <div
-          className="max-w-[88%] rounded-2xl rounded-br-sm px-4 py-2.5 text-[15px] leading-relaxed"
-          style={{
-            backgroundColor: "var(--widget-user-bubble)",
-            color: "var(--widget-text)",
-          }}
-        >
-          {text}
-        </div>
+        <Message from="user" className="max-w-[88%]">
+          <MessageContent variant="contained">{text}</MessageContent>
+        </Message>
       ) : (
-        <div className="flex w-full max-w-full flex-col gap-2">
-          {questionToolParts.map((part, index) => (
-            <AskUserQuestionTool
-              key={`${message.id}-ask-${index}`}
-              input={getToolInput(part)}
-              output={getToolOutput(part)}
-              toolCallId={getToolCallId(part)}
-              onSelect={onToolOptionSelect}
-            />
-          ))}
-          {compareToolParts.map((part, index) => (
-            <CompareToolCard
-              key={`${message.id}-compare-${index}`}
-              output={getToolOutput(part)}
-            />
-          ))}
-          <FormattedMessage
-            text={text}
-            messageId={message.id}
-            isStreaming={isLastAssistant && isStreaming}
-            theme={theme}
-          />
+        <div className="flex w-full flex-col gap-1.5">
+          {assistantBlocks.map((block, blockIndex) => {
+            if (block.type === "ask") {
+              return (
+                <AskUserQuestionTool
+                  key={`${message.id}-ask-${block.index}`}
+                  input={getToolInput(block.part)}
+                  output={getToolOutput(block.part)}
+                  toolCallId={getToolCallId(block.part)}
+                  onSelect={onToolOptionSelect}
+                />
+              );
+            }
+
+            return (
+              <Message
+                key={`${message.id}-bubble-${blockIndex}`}
+                from="assistant"
+                className="max-w-full gap-1"
+              >
+                <MessageContent variant="contained">
+                  {block.parts.map((part, index) => {
+                    if (part.type === "text" && part.text.trim()) {
+                      return (
+                        <FormattedMessage
+                          key={`${message.id}-text-${blockIndex}-${index}`}
+                          text={part.text}
+                          isStreaming={isLastAssistant && isStreaming}
+                          onPillSelect={onPillSelect}
+                        />
+                      );
+                    }
+
+                    if (part.type === "tool-product_search") {
+                      return (
+                        <ProductSearchTool
+                          key={`${message.id}-products-${blockIndex}-${index}`}
+                          output={getToolOutput(part)}
+                          selectedProductKeys={selectedProductKeys}
+                          favouriteProductKeys={favouriteProductKeys}
+                          onToggleCompareSelection={onToggleCompareSelection}
+                          onToggleFavourite={onToggleFavourite}
+                        />
+                      );
+                    }
+
+                    if (part.type === "tool-compare_tool") {
+                      return (
+                        <CompareToolCard
+                          key={`${message.id}-compare-${blockIndex}-${index}`}
+                          output={getToolOutput(part)}
+                        />
+                      );
+                    }
+
+                    return null;
+                  })}
+                </MessageContent>
+              </Message>
+            );
+          })}
         </div>
       )}
     </div>
@@ -675,85 +978,22 @@ function MessageBubble({
 
 function FormattedMessage({
   text,
-  messageId,
   isStreaming,
-  theme,
+  onPillSelect,
 }: {
   text: string;
-  messageId: string;
   isStreaming: boolean;
-  theme: WidgetTheme;
+  onPillSelect?: (prompt: string) => void;
 }) {
-  const segments = useMemo(() => parseSegments(text), [text]);
-  const content: React.ReactNode[] = [];
+  const parsed = parseAssistantMarkup(stripStageTag(text));
+  const content = cleanTextSegment(parsed.prose);
+  if (!content && parsed.actions.length === 0) return null;
 
-  for (let idx = 0; idx < segments.length; idx++) {
-    const seg = segments[idx];
-
-    if (seg.type === "html" && isProductCardHtml(seg.content)) {
-      const cardSegments = [seg];
-
-      while (
-        idx + 1 < segments.length &&
-        segments[idx + 1].type === "html" &&
-        isProductCardHtml(segments[idx + 1].content)
-      ) {
-        cardSegments.push(segments[idx + 1]);
-        idx++;
-      }
-
-      content.push(
-        <div
-          key={`${messageId}-cards-${idx}`}
-          className="my-1 flex w-full flex-col gap-3"
-        >
-          {cardSegments.map((cardSeg, cardIdx) => (
-            <div
-              key={`${messageId}-html-${idx}-${cardIdx}`}
-              className="w-full min-w-0"
-            >
-              <InlineHTML
-                html={cardSeg.content}
-                id={`${messageId}-${idx}-${cardIdx}`}
-                theme={theme}
-              />
-            </div>
-          ))}
-        </div>
-      );
-      continue;
-    }
-
-    if (seg.type === "html") {
-      const isPillRow = isPillOnlyHtml(seg.content);
-
-      content.push(
-        <div
-          key={`${messageId}-html-shell-${idx}`}
-          className={isPillRow ? "" : "px-1 py-1"}
-        >
-          <InlineHTML
-            key={`${messageId}-html-${idx}`}
-            html={seg.content}
-            id={`${messageId}-${idx}`}
-            theme={theme}
-          />
-        </div>
-      );
-      continue;
-    }
-
-    content.push(
-      <div
-        key={`${messageId}-text-${idx}`}
-        className="streamdown-content rounded-2xl px-4 py-3"
-        style={{
-          border: "1px solid var(--widget-border)",
-          backgroundColor: "var(--widget-assistant-bubble)",
-          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-        }}
-      >
-        <Streamdown
+  return (
+    <div className="space-y-1.5">
+      {content ? (
+        <MessageResponse
+          className="streamdown-content text-sm"
           mode={isStreaming ? "streaming" : "static"}
           parseIncompleteMarkdown={isStreaming}
           linkSafety={{ enabled: false }}
@@ -771,70 +1011,158 @@ function FormattedMessage({
             ),
           }}
         >
-          {seg.content}
-        </Streamdown>
-      </div>
-    );
-  }
-
-  return <>{content}</>;
+          {content}
+        </MessageResponse>
+      ) : null}
+      {!isStreaming && parsed.actions.length > 0 && onPillSelect ? (
+        <div className="flex flex-wrap gap-2 px-1">
+          {parsed.actions.map((action) => (
+            <Button
+              key={`${action.label}-${action.prompt}`}
+              type="button"
+              variant="secondary"
+              className={suggestionButtonClassName}
+              onClick={() => onPillSelect(action.prompt)}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function ChatMessages({
   messages,
   isStreaming,
-  messagesEndRef,
-  lastAssistantRef,
-  scrollContainerRef,
   branding,
   theme,
   onToolOptionSelect,
+  onSuggestionSelect,
+  suggestions,
+  selectedProductKeys,
+  favouriteProductKeys,
+  onToggleCompareSelection,
+  onToggleFavourite,
 }: {
   messages: UIMessage[];
   isStreaming: boolean;
-  messagesEndRef: RefObject<HTMLDivElement | null>;
-  lastAssistantRef?: RefObject<HTMLDivElement | null>;
-  scrollContainerRef?: RefObject<HTMLDivElement | null>;
   branding: WidgetBranding;
   theme: WidgetTheme;
   onToolOptionSelect: (selection: {
     toolCallId: string;
     answers: Array<{ header: string; question: string; answer: string }>;
   }) => void;
+  onSuggestionSelect: (suggestion: string) => void;
+  suggestions: string[];
+  selectedProductKeys: string[];
+  favouriteProductKeys: string[];
+  onToggleCompareSelection: (product: SelectableProductCard) => void;
+  onToggleFavourite: (product: SelectableProductCard) => void;
 }) {
-  let lastAssistantIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "assistant") {
-      lastAssistantIdx = i;
-      break;
+  const displayMessages = splitTransientAssistantMessages(
+    messages.filter((message) => message.id !== "welcome")
+  );
+  const groupedMessages = displayMessages.reduce<UIMessage[]>((groups, message) => {
+    const previous = groups[groups.length - 1];
+    if (previous && shouldMergeAssistantMessages(previous, message)) {
+      groups[groups.length - 1] = {
+        ...previous,
+        id: `${previous.id}-${message.id}`,
+        parts: [...previous.parts, ...message.parts],
+      };
+      return groups;
     }
-  }
+
+    groups.push(message);
+    return groups;
+  }, []);
+  const welcomeText =
+    messages
+      .find((message) => message.id === "welcome")
+      ?.parts.map(getTextPart)
+      .join("")
+      .trim() || `Hi there! I'm ${branding.assistantName}. How can I help?`;
+  const hasPendingAssistant =
+    isStreaming && groupedMessages[groupedMessages.length - 1]?.role === "user";
+  const hasUserMessages = groupedMessages.some((message) => message.role === "user");
+  const showGreeting = !hasUserMessages && !isStreaming && !hasPendingAssistant;
 
   return (
-    <div
-      ref={scrollContainerRef}
-      className="chat-messages flex-1 overflow-y-auto py-3"
-      style={{
-        backgroundColor: "var(--widget-surface-alt)",
-        overscrollBehavior: "contain",
-      }}
+    <ConversationRoot
+      className="flex-1"
+      style={{ backgroundColor: "var(--widget-surface-alt)" }}
     >
-      {messages.map((msg, i) => (
-        <MessageBubble
-          key={msg.id}
-          message={msg}
-          isLastAssistant={i === lastAssistantIdx}
-          isStreaming={isStreaming}
-          lastAssistantRef={lastAssistantRef}
-          branding={branding}
-          theme={theme}
-          onToolOptionSelect={onToolOptionSelect}
-        />
-      ))}
-      {isStreaming && messages[messages.length - 1]?.role === "user" && (
-        <TypingIndicator />
-      )}
-      <div ref={messagesEndRef} />
-    </div>
+      <Conversation
+        className="chat-messages"
+        style={{ overscrollBehavior: "contain" }}
+      >
+        <ConversationContent
+          className={cn(
+            "gap-3 px-4 py-3",
+            showGreeting && "min-h-full justify-start pt-14"
+          )}
+        >
+          {showGreeting ? (
+            <ConversationEmptyState className="px-6 py-8">
+              <Empty className="w-full max-w-xl gap-6 border-0 p-0">
+                <EmptyHeader className="w-full max-w-xl">
+                  <EmptyTitle className="w-full text-[20px] leading-[1.35] font-semibold text-pretty">
+                    {welcomeText}
+                  </EmptyTitle>
+                </EmptyHeader>
+                <EmptyContent className="w-full max-w-xl gap-3">
+                  <QuickSuggestions
+                    suggestions={chatQuickSuggestions}
+                    onSelect={onSuggestionSelect}
+                    disabled={isStreaming}
+                  />
+                </EmptyContent>
+              </Empty>
+            </ConversationEmptyState>
+          ) : (
+            <>
+              {groupedMessages.map((msg, index) =>
+                isInterjectionMessage(msg) ? (
+                  <InterjectionMessageBubble
+                    key={msg.id}
+                    message={msg}
+                    branding={branding}
+                    theme={theme}
+                    onPillSelect={onSuggestionSelect}
+                  />
+                ) : (
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    isLastAssistant={
+                      msg.role === "assistant" && index === groupedMessages.length - 1
+                    }
+                    isStreaming={isStreaming}
+                    branding={branding}
+                    theme={theme}
+                    onToolOptionSelect={onToolOptionSelect}
+                    onPillSelect={onSuggestionSelect}
+                    selectedProductKeys={selectedProductKeys}
+                    favouriteProductKeys={favouriteProductKeys}
+                    onToggleCompareSelection={onToggleCompareSelection}
+                    onToggleFavourite={onToggleFavourite}
+                  />
+                )
+              )}
+              {!isStreaming && suggestions.length > 0 ? (
+                <NextQuestionSuggestions
+                  suggestions={suggestions}
+                  onSelect={onSuggestionSelect}
+                />
+              ) : null}
+            </>
+          )}
+          {hasPendingAssistant ? <TypingIndicator /> : null}
+        </ConversationContent>
+      </Conversation>
+      <ConversationScrollButton className="bottom-3" />
+    </ConversationRoot>
   );
 }
