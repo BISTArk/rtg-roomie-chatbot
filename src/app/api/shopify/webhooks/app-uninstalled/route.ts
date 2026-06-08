@@ -1,31 +1,18 @@
-import { NextRequest } from "next/server";
-import {
-  getShopifyAppConfig,
-  normalizeShopifyShopDomain,
-  verifyShopifyWebhookSignature,
-} from "@/lib/shopify";
+import type { NextRequest } from "next/server";
 import { markShopifyInstallationUninstalled } from "@/lib/tenant-platform";
+import { readVerifiedShopifyWebhook } from "@/lib/shopify-webhook";
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
-
-  try {
-    const config = getShopifyAppConfig(request.nextUrl.origin);
-    const isValid = verifyShopifyWebhookSignature({
-      rawBody,
-      hmacHeader: request.headers.get("x-shopify-hmac-sha256"),
-      secret: config.apiSecret,
-    });
-    if (!isValid) {
+  const verified = await readVerifiedShopifyWebhook(request);
+  if (!verified.ok) {
+    if (verified.status === 401) {
       return Response.json({ error: "Invalid Shopify webhook signature." }, { status: 401 });
     }
+    return Response.json({ error: "Invalid Shopify webhook request." }, { status: 400 });
+  }
 
-    const shop = normalizeShopifyShopDomain(request.headers.get("x-shopify-shop-domain"));
-    if (!shop) {
-      return Response.json({ error: "Missing Shopify shop domain." }, { status: 400 });
-    }
-
-    await markShopifyInstallationUninstalled(shop);
+  try {
+    await markShopifyInstallationUninstalled(verified.shop);
     return new Response(null, { status: 200 });
   } catch (error) {
     return Response.json(

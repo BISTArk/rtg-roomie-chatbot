@@ -13,6 +13,14 @@ scopes = "read_products"
 [webhooks]
 api_version = "2026-07"
 
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "https://ai-shop-assist-discount-mattress.vercel.app/api/shopify/webhooks/compliance"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "https://ai-shop-assist-discount-mattress.vercel.app/api/shopify/webhooks/app-uninstalled"
+
 [auth]
 redirect_urls = [ "https://ai-shop-assist-discount-mattress.vercel.app/api/shopify/callback" ]
 
