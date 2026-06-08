@@ -632,6 +632,8 @@ export async function POST(request: Request) {
         pageContext: pageContext ?? undefined,
         customerLocation,
       });
+      const sanitized = sanitizeForModel(messages, branding);
+      const modelMessages = await convertToModelMessages(sanitized);
       return buildTrackedStreamResponse({
         tenantId: tenant.tenantId,
         sessionId,
@@ -645,9 +647,13 @@ export async function POST(request: Request) {
           model: chatModel,
           system: systemPrompt,
           messages: [
+            ...modelMessages,
             {
               role: "user",
-              content: "The customer just arrived on the site for a fresh session (no chat history). Generate the one-time greeting.",
+              content:
+                modelMessages.length > 0
+                  ? "Generate the one-time new-session greeting bubble now. Use short prose plus the required action tiles from the skill."
+                  : "The customer just arrived on the site for a fresh session (no chat history). Generate the one-time greeting.",
             },
           ],
         },

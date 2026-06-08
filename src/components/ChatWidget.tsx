@@ -345,10 +345,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const launcherRef = useRef<HTMLButtonElement>(null);
   const interjectionRef = useRef<HTMLDivElement>(null);
   // Durable flag: set when user clicks the in-chat refresh icon. Blocks
-  // "Welcome back, you were looking for..." greetings in both the same
-  // session (handleOpen → generateReturningGreeting) and future sessions
-  // (shop-assist-init → triggerNewSessionGreeting returning path). Cleared when
-  // the user sends their first message after the refresh. Storage is
+  // returning-style greetings until they actually send a message. Storage is
   // bridged to embed.js → host localStorage so it persists across tabs
   // and reloads.
   const suppressReturningRef = useRef<boolean>(false);
@@ -368,6 +365,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const triggerReengagementRef = useRef<() => void>(undefined);
   const triggerInterjectionRef = useRef<(type: string) => void>(undefined);
   const triggerNewSessionGreetingRef = useRef<() => void>(undefined);
+  const sessionStartGreetingFiredRef = useRef(false);
   const triggerUpsellRef = useRef<() => void>(undefined);
   // Pending upsell: set when add-to-cart succeeds, cleared when we fire
   // the upsell (either on next cart refresh or via fallback timeout).
@@ -1275,42 +1273,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     [setMessages]
   );
 
-  // Generate personalized greeting for returning visitors when widget opens
-  const generateReturningGreeting = useCallback(async () => {
-    if (isProactiveBudgetExhausted(messagesRef.current)) return;
-    const profile = loadVisitorProfile();
-    if (profile.visitCount <= 1 && profile.viewedProducts.length === 0) {
-      return;
-    }
-
-    const saved = loadMessages();
-    if (saved && saved.length > 1) {
-      return;
-    }
-
-    setMessages([]);
-
-    try {
-      requestExtrasRef.current = {
-        type: "returning",
-        visitorProfile: profile,
-      };
-      const chunkStream = await transport.sendMessages({
-        trigger: "submit-message",
-        chatId: CHAT_ID,
-        messageId: undefined,
-        messages: [],
-        abortSignal: undefined,
-      });
-      await consumeAssistantStream(chunkStream);
-      if (!hasUserEngaged(messagesRef.current)) {
-        recordProactiveAttempt();
-      }
-    } catch {
-      setMessages([welcomeUi]);
-    }
-  }, [transport, setMessages, welcomeUi, consumeAssistantStream]);
-
   // Shared guard gate — every proactive trigger calls this first.
   // `mark` (default true) advances the 15s stack debounce. State 4's
   // new-session greeting is a one-shot init message, not an interruption —
@@ -1484,34 +1446,28 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, [transport, messages, humanMode, gatedFire, consumeAssistantStream]);
 
   const triggerNewSessionGreeting = useCallback(async () => {
+    if (sessionStartGreetingFiredRef.current) return;
     // State 4 is a one-shot init greeting; don't mark the 15s debounce so
     // State 2's contextual can still fire on PDP landings.
     if (!gatedFire("new-session", false)) return;
     if (!tenantTokenRef.current) return;
+
+    sessionStartGreetingFiredRef.current = true;
     const profile = loadVisitorProfile();
     const currentMessages = messagesRef.current;
     const hasPriorChat =
       currentMessages.filter((m) => m.id !== "welcome").length > 0;
-    // Post-refresh: the customer explicitly asked for a clean slate. Force
-    // the first-timer "new-session" path (generic intro) instead of
-    // "returning" (welcome-back with history), even though visitCount > 1.
-    const hasPriorContext =
-      !suppressReturningRef.current &&
-      (hasPriorChat ||
-        profile.visitCount > 1 ||
-        profile.viewedProducts.length > 0);
     setIsNewSessionPhase(true);
     try {
       if (!hasPriorChat) {
-        // New customer: start fresh with no welcome (skill produces the intro)
         setMessages([]);
       }
-      requestExtrasRef.current = hasPriorContext
-        ? { type: "returning", visitorProfile: profile }
-        : { type: "new-session", visitorProfile: profile };
-      // When there's prior chat, send the full history to the API so the
-      // returning skill can reference the last topic. When no history, send
-      // empty array and the skill uses the generic new-session intro.
+      // Always use the new-session skill so the closed-state bubble gets
+      // short prose + action tiles — not the returning skill's plain greeting.
+      requestExtrasRef.current = {
+        type: "new-session",
+        visitorProfile: profile,
+      };
       const historyForApi = hasPriorChat
         ? stripUnresolvedToolParts(currentMessages)
         : [];
@@ -1527,6 +1483,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         presentProactiveAssistantMessage(greeting);
       }
     } catch {
+      sessionStartGreetingFiredRef.current = false;
       if (!hasPriorChat) setMessages([welcomeUi]);
     }
   }, [transport, setMessages, gatedFire, welcomeUi, readAssistantStream, presentProactiveAssistantMessage]);
@@ -1604,23 +1561,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, []);
 
   const handleOpen = useCallback(() => {
-    setShowInterjection(false);
-    setInterjectionContent(null);
     setIsOpen(true);
-    if (
-      visitorProfile &&
-      visitorProfile.visitCount > 1 &&
-      messages.length <= 1 &&
-      !suppressReturningRef.current
-    ) {
-      generateReturningGreeting();
-    }
     // If user is on a PDP and opens the chat, fire State 2 after dwell
     const ctx = pageContextRef.current;
     if (ctx && ctx.page === "pdp" && ctx.productName) {
       setTimeout(() => scheduleContextualForPdpRef.current?.(ctx), 300);
     }
-  }, [visitorProfile, messages.length, generateReturningGreeting]);
+  }, []);
 
   const handleRefresh = useCallback(() => {
     const nextSessionId = createBrowserSessionId();
@@ -1630,6 +1577,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     setSuggestions([]);
     setHumanMode(false);
     resetProactiveAttemptCount();
+    sessionStartGreetingFiredRef.current = false;
     setSessionId(nextSessionId);
     if (embed && typeof window !== "undefined" && window.parent !== window) {
       window.parent.postMessage(
