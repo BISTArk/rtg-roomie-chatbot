@@ -789,15 +789,24 @@ function InterjectionMessageBubble({
   branding,
   theme,
   onPillSelect,
+  selectedProductKeys,
+  favouriteProductKeys,
+  onToggleCompareSelection,
+  onToggleFavourite,
 }: {
   message: UIMessage;
   branding: WidgetBranding;
   theme: WidgetTheme;
   onPillSelect?: (prompt: string) => void;
+  selectedProductKeys: string[];
+  favouriteProductKeys: string[];
+  onToggleCompareSelection: (product: SelectableProductCard) => void;
+  onToggleFavourite: (product: SelectableProductCard) => void;
 }) {
   const text = message.parts.map(getTextPart).join("");
   const parsed = parseAssistantMarkup(stripStageTag(text));
-  if (!parsed.prose && parsed.actions.length === 0) return null;
+  const productParts = message.parts.filter((part) => part.type === "tool-product_search");
+  if (!parsed.prose && parsed.actions.length === 0 && productParts.length === 0) return null;
 
   return (
     <div className="chat-bubble-enter flex w-full flex-col gap-1.5">
@@ -816,6 +825,16 @@ function InterjectionMessageBubble({
               {parsed.prose}
             </MessageResponse>
           ) : null}
+          {productParts.map((part, index) => (
+            <ProductSearchTool
+              key={`${message.id}-products-${index}`}
+              output={getToolOutput(part)}
+              selectedProductKeys={selectedProductKeys}
+              favouriteProductKeys={favouriteProductKeys}
+              onToggleCompareSelection={onToggleCompareSelection}
+              onToggleFavourite={onToggleFavourite}
+            />
+          ))}
           {parsed.actions.length > 0 && onPillSelect ? (
             <div className="flex flex-wrap gap-2">
               {parsed.actions.map((action) => (
@@ -833,6 +852,80 @@ function InterjectionMessageBubble({
           ) : null}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+export function ProactiveBubbleContent({
+  message,
+  selectedProductKeys,
+  favouriteProductKeys,
+  onToggleCompareSelection,
+  onToggleFavourite,
+  onActionSelect,
+  onOpenChat,
+}: {
+  message: UIMessage;
+  selectedProductKeys: string[];
+  favouriteProductKeys: string[];
+  onToggleCompareSelection: (product: SelectableProductCard) => void;
+  onToggleFavourite: (product: SelectableProductCard) => void;
+  onActionSelect: (prompt: string) => void;
+  onOpenChat?: () => void;
+}) {
+  const text = message.parts.map(getTextPart).join("");
+  const parsed = parseAssistantMarkup(stripStageTag(text));
+  const productParts = message.parts.filter((part) => part.type === "tool-product_search");
+
+  return (
+    <div className="space-y-3">
+      {parsed.prose ? (
+        onOpenChat ? (
+          <button type="button" className="w-full text-left" onClick={onOpenChat}>
+            <MessageResponse
+              className="streamdown-content text-[15px] leading-relaxed"
+              mode="static"
+              linkSafety={{ enabled: false }}
+            >
+              {parsed.prose}
+            </MessageResponse>
+          </button>
+        ) : (
+          <MessageResponse
+            className="streamdown-content text-[15px] leading-relaxed"
+            mode="static"
+            linkSafety={{ enabled: false }}
+          >
+            {parsed.prose}
+          </MessageResponse>
+        )
+      ) : null}
+      {productParts.map((part, index) => (
+        <ProductSearchTool
+          key={`${message.id}-bubble-products-${index}`}
+          output={getToolOutput(part)}
+          selectedProductKeys={selectedProductKeys}
+          favouriteProductKeys={favouriteProductKeys}
+          onToggleCompareSelection={onToggleCompareSelection}
+          onToggleFavourite={onToggleFavourite}
+        />
+      ))}
+      {parsed.actions.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {parsed.actions.map((action) => (
+            <Button
+              key={`${action.label}-${action.prompt}`}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-auto min-h-8 whitespace-normal rounded-full px-4 py-2 text-xs"
+              onClick={() => onActionSelect(action.prompt)}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1170,6 +1263,10 @@ export function ChatMessages({
                     branding={branding}
                     theme={theme}
                     onPillSelect={onSuggestionSelect}
+                    selectedProductKeys={selectedProductKeys}
+                    favouriteProductKeys={favouriteProductKeys}
+                    onToggleCompareSelection={onToggleCompareSelection}
+                    onToggleFavourite={onToggleFavourite}
                   />
                 ) : (
                   <MessageBubble

@@ -544,30 +544,38 @@ export async function POST(request: Request) {
       });
     }
 
-    // State 2: Contextual product commentary (chat open, navigated to PDP,
-    // dwelled 5+ seconds, not within cooldown). Uses the contextual skill.
+    // State 2: PDP product detail (navigated to PDP, dwelled 5+ seconds). Same
+    // response as if the customer typed "Tell me more about this mattress".
     if (type === "contextual" && pageContext) {
-      console.log("[chat route] → contextual path, product:", pageContext.productName);
+      const productName = pageContext.productName || "this mattress";
+      const tellMeMoreText = `Tell me more about the ${productName}`;
+      const augmentedPlainMessages = [
+        ...plainMessages,
+        { role: "user" as const, text: tellMeMoreText },
+      ];
+      const stage: ConversationStage = "recommendation";
+
+      console.log("[chat route] → contextual path (product detail), product:", productName);
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
         plannerModel: chatModel,
-        stage: "contextual",
+        stage,
         type,
-        plainMessages,
+        plainMessages: augmentedPlainMessages,
         pageContext,
         browsingHistory: browsingHistory ?? undefined,
         visitorProfile: visitorProfile ?? undefined,
       });
       console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      if (blockForMissingCatalog("contextual", retrieval.catalogData)) {
+      if (blockForMissingCatalog(stage, retrieval.catalogData)) {
         console.warn("[chat route] blocking contextual response because tenant catalog is missing");
         if (sessionId) {
           await recordConversationAnalytics({
             tenantId: tenant.tenantId,
             sessionId,
             requestType: "contextual",
-            conversationStage: "contextual",
+            conversationStage: stage,
             modelKey,
             modelId,
             inputMessageCount: messages.length,
@@ -578,9 +586,9 @@ export async function POST(request: Request) {
         }
         return createMissingCatalogResponse(messages);
       }
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "contextual", {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, stage, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts.contextual,
+        skillPrompt: tenant.skillPrompts.recommendation,
         visitorProfile: visitorProfile ?? undefined,
         pageContext,
       });
@@ -591,7 +599,7 @@ export async function POST(request: Request) {
         sessionId,
         hostOrigin,
         requestType: "contextual",
-        stage: "contextual",
+        stage,
         modelKey,
         modelId,
         inputMessageCount: messages.length,
@@ -602,7 +610,7 @@ export async function POST(request: Request) {
             ...modelMessages,
             {
               role: "user",
-              content: `The customer just landed on the product page for "${pageContext.productName || "a product"}"${pageContext.productPrice ? ` (${pageContext.productPrice})` : ""}. Generate the contextual commentary NOW, following the contextual skill. Keep it under 25 words.`,
+              content: `${tellMeMoreText}. They are viewing this product page right now. Respond exactly as you would to that chat message: share 2-3 specific details about this mattress tied to any preferences from the conversation, call product_search with this exact product, then ask one brief follow-up question. Do not use HTML tiles or fenced HTML.`,
             },
           ],
         },
