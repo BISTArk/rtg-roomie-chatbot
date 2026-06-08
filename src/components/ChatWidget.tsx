@@ -14,7 +14,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { ChatHeader } from "./ChatHeader";
 import { ChatFavourites } from "./ChatFavourites";
 import { ChatHistory } from "./ChatHistory";
-import { ChatMessages, ProactiveBubbleContent } from "./ChatMessages";
+import { ChatMessages } from "./ChatMessages";
 import { ChatInput } from "./ChatInput";
 import { WidgetAvatar } from "./WidgetAvatar";
 import {
@@ -69,15 +69,19 @@ import {
 } from "@/lib/favourites-storage";
 import { fetchSuggestions } from "@/lib/chat-suggestions";
 import {
+  parseAssistantMarkup,
+  type ParsedAssistantMarkup,
+} from "@/lib/assistant-html";
+import {
   createInterjectionMessageId,
   dismissInterjection,
-  hasProactiveBubbleContent,
   INTERJECTION_DISMISSED_KEY,
   isInterjectionDismissed,
   isTransientProactiveMessage,
   pickInterjectionType,
   STANDALONE_INTERJECTION_DELAY_MS,
 } from "@/lib/interjection";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import type { SessionHistoryItem, TenantBootstrap } from "@/lib/platform-types";
 import type { SelectableProductCard } from "@/lib/product-types";
@@ -274,8 +278,8 @@ async function syncSessionToDb(input: {
 export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [showInterjection, setShowInterjection] = useState(false);
-  const [proactiveBubbleMessage, setProactiveBubbleMessage] =
-    useState<UIMessage | null>(null);
+  const [interjectionContent, setInterjectionContent] =
+    useState<ParsedAssistantMarkup | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string>("");
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
@@ -467,14 +471,18 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     isOpenRef.current = isOpen;
     if (isOpen) {
       setShowInterjection(false);
-      setProactiveBubbleMessage(null);
+      setInterjectionContent(null);
     } else {
       const lastTransient = [...messagesRef.current]
         .reverse()
         .find(isTransientProactiveMessage);
-      if (lastTransient && hasProactiveBubbleContent(lastTransient)) {
-        setProactiveBubbleMessage(lastTransient);
-        setShowInterjection(true);
+      if (lastTransient) {
+        const text = stripStageTag(getTextFromUIMessage(lastTransient)).trim();
+        const parsed = text ? parseAssistantMarkup(text) : null;
+        if (parsed?.prose) {
+          setInterjectionContent(parsed);
+          setShowInterjection(true);
+        }
       }
     }
     // Tell embed.js to resize the iframe
@@ -521,7 +529,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       reportEmbedPeekSize();
     });
     return () => cancelAnimationFrame(frame);
-  }, [reportEmbedPeekSize, proactiveBubbleMessage]);
+  }, [reportEmbedPeekSize, interjectionContent]);
 
   useEffect(() => {
     if (!embed || !showInterjection || isOpen) return;
@@ -1219,14 +1227,16 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       recordProactiveAttempt();
     }
 
-    if (!isOpenRef.current && hasProactiveBubbleContent(storedMessage)) {
-      setProactiveBubbleMessage(storedMessage);
+    const text = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+    const parsed = text ? parseAssistantMarkup(text) : null;
+    if (parsed?.prose && !isOpenRef.current) {
+      setInterjectionContent(parsed);
       setShowInterjection(true);
       return;
     }
 
     setShowInterjection(false);
-    setProactiveBubbleMessage(null);
+    setInterjectionContent(null);
   }, [setMessages]);
 
   const consumeAssistantStream = useCallback(
@@ -1699,7 +1709,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const handleInterjectionAction = useCallback(
     (prompt: string) => {
       setShowInterjection(false);
-      setProactiveBubbleMessage(null);
+      setInterjectionContent(null);
       setMessages((prev) =>
         prev.filter((message) => !isTransientProactiveMessage(message))
       );
@@ -1798,31 +1808,51 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       {/* Toggle button — Shopping Assistant pill */}
       {!isOpen && (
         <>
-          {showInterjection && proactiveBubbleMessage ? (
+          {showInterjection && interjectionContent?.prose ? (
             <div
               ref={interjectionRef}
               role="status"
-              className={`interjection-enter fixed bottom-[88px] z-50 max-w-[min(360px,calc(100vw-48px))] rounded-2xl px-5 py-4 text-[15px] leading-relaxed shadow-[var(--widget-shadow)] sm:bottom-[96px] ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
+              className={`interjection-enter fixed bottom-[88px] z-50 max-w-[min(320px,calc(100vw-48px))] rounded-2xl px-5 py-4 text-[15px] leading-relaxed shadow-[var(--widget-shadow)] sm:bottom-[96px] ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
               style={{
                 backgroundColor: "var(--widget-surface)",
                 color: "var(--widget-text)",
                 border: "1px solid var(--widget-border)",
               }}
             >
-              <ProactiveBubbleContent
-                message={proactiveBubbleMessage}
-                selectedProductKeys={selectedProductKeys}
-                favouriteProductKeys={favouriteProductKeys}
-                onToggleCompareSelection={toggleCompareSelection}
-                onToggleFavourite={toggleFavourite}
-                onActionSelect={handleInterjectionAction}
-                onOpenChat={handleOpen}
-              />
+              <button
+                type="button"
+                className="w-full text-left"
+                onClick={handleOpen}
+              >
+                <MessageResponse
+                  className="streamdown-content text-[15px] leading-relaxed"
+                  mode="static"
+                  linkSafety={{ enabled: false }}
+                >
+                  {interjectionContent.prose}
+                </MessageResponse>
+              </button>
+              {interjectionContent.actions.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {interjectionContent.actions.map((action) => (
+                    <Button
+                      key={`${action.label}-${action.prompt}`}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-auto min-h-8 whitespace-normal rounded-full px-4 py-2 text-xs"
+                      onClick={() => handleInterjectionAction(action.prompt)}
+                    >
+                      {action.label}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
                   setShowInterjection(false);
-                  setProactiveBubbleMessage(null);
+                  setInterjectionContent(null);
                   setMessages((prev) =>
                     prev.filter((message) => !isTransientProactiveMessage(message))
                   );

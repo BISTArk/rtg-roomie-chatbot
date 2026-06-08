@@ -214,33 +214,47 @@ function buildTrackedStreamResponse(input: {
   modelId: string;
   inputMessageCount: number;
   streamArgs: Parameters<typeof streamText>[0];
+  withTools?: boolean;
 }): Response {
-  const result = streamText({
-    ...input.streamArgs,
-    tools: chatTools,
-    stopWhen: isLoopFinished(),
-    onFinish: async (event) => {
-      if (!input.sessionId) return;
-      const usage: LanguageModelUsage = event.totalUsage;
-      await recordConversationAnalytics({
-        tenantId: input.tenantId,
-        sessionId: input.sessionId,
-        requestType: input.requestType,
-        conversationStage: input.stage || null,
-        modelKey: input.modelKey,
-        modelId: event.model.modelId || input.modelId,
-        providerId: event.model.provider || null,
-        inputMessageCount: input.inputMessageCount,
-        promptTokens: normalizeUsageCount(usage.inputTokens),
-        completionTokens: normalizeUsageCount(usage.outputTokens),
-        totalTokens: normalizeUsageCount(usage.totalTokens),
-        responseCharCount: event.text.length,
-        finishReason: event.finishReason,
-        status: event.finishReason === "error" ? "error" : "completed",
-        hostOrigin: input.hostOrigin,
-      });
-    },
-  });
+  const recordFinish = async (event: {
+    totalUsage: LanguageModelUsage;
+    model: { modelId?: string; provider?: string | null };
+    text: string;
+    finishReason: string;
+  }) => {
+    if (!input.sessionId) return;
+    const usage = event.totalUsage;
+    await recordConversationAnalytics({
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      requestType: input.requestType,
+      conversationStage: input.stage || null,
+      modelKey: input.modelKey,
+      modelId: event.model.modelId || input.modelId,
+      providerId: event.model.provider || null,
+      inputMessageCount: input.inputMessageCount,
+      promptTokens: normalizeUsageCount(usage.inputTokens),
+      completionTokens: normalizeUsageCount(usage.outputTokens),
+      totalTokens: normalizeUsageCount(usage.totalTokens),
+      responseCharCount: event.text.length,
+      finishReason: event.finishReason,
+      status: event.finishReason === "error" ? "error" : "completed",
+      hostOrigin: input.hostOrigin,
+    });
+  };
+
+  const result =
+    input.withTools === false
+      ? streamText({
+          ...input.streamArgs,
+          onFinish: recordFinish,
+        })
+      : streamText({
+          ...input.streamArgs,
+          tools: chatTools,
+          stopWhen: isLoopFinished(),
+          onFinish: recordFinish,
+        });
 
   return result.toUIMessageStreamResponse({
     onError: () => "Something went wrong.",
@@ -544,38 +558,30 @@ export async function POST(request: Request) {
       });
     }
 
-    // State 2: PDP product detail (navigated to PDP, dwelled 5+ seconds). Same
-    // response as if the customer typed "Tell me more about this mattress".
+    // State 2: PDP product summary (navigated to PDP, dwelled 5+ seconds).
+    // Two-line plain-text summary — no product cards or action tiles.
     if (type === "contextual" && pageContext) {
-      const productName = pageContext.productName || "this mattress";
-      const tellMeMoreText = `Tell me more about the ${productName}`;
-      const augmentedPlainMessages = [
-        ...plainMessages,
-        { role: "user" as const, text: tellMeMoreText },
-      ];
-      const stage: ConversationStage = "recommendation";
-
-      console.log("[chat route] → contextual path (product detail), product:", productName);
+      console.log("[chat route] → contextual path, product:", pageContext.productName);
       const retrieval = await resolveCatalogForStage({
         tenantId: tenant.tenantId,
         plannerModel: chatModel,
-        stage,
+        stage: "contextual",
         type,
-        plainMessages: augmentedPlainMessages,
+        plainMessages,
         pageContext,
         browsingHistory: browsingHistory ?? undefined,
         visitorProfile: visitorProfile ?? undefined,
       });
       console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      if (blockForMissingCatalog(stage, retrieval.catalogData)) {
+      if (blockForMissingCatalog("contextual", retrieval.catalogData)) {
         console.warn("[chat route] blocking contextual response because tenant catalog is missing");
         if (sessionId) {
           await recordConversationAnalytics({
             tenantId: tenant.tenantId,
             sessionId,
             requestType: "contextual",
-            conversationStage: stage,
+            conversationStage: "contextual",
             modelKey,
             modelId,
             inputMessageCount: messages.length,
@@ -586,9 +592,9 @@ export async function POST(request: Request) {
         }
         return createMissingCatalogResponse(messages);
       }
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, stage, {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "contextual", {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts.recommendation,
+        skillPrompt: tenant.skillPrompts.contextual,
         visitorProfile: visitorProfile ?? undefined,
         pageContext,
       });
@@ -599,10 +605,11 @@ export async function POST(request: Request) {
         sessionId,
         hostOrigin,
         requestType: "contextual",
-        stage,
+        stage: "contextual",
         modelKey,
         modelId,
         inputMessageCount: messages.length,
+        withTools: false,
         streamArgs: {
           model: chatModel,
           system: systemPrompt,
@@ -610,7 +617,7 @@ export async function POST(request: Request) {
             ...modelMessages,
             {
               role: "user",
-              content: `${tellMeMoreText}. They are viewing this product page right now. Respond exactly as you would to that chat message: share 2-3 specific details about this mattress tied to any preferences from the conversation, call product_search with this exact product, then ask one brief follow-up question. Do not use HTML tiles or fenced HTML.`,
+              content: `The customer is viewing "${pageContext.productName || "this product"}"${pageContext.productPrice ? ` (${pageContext.productPrice})` : ""}. Write a two-line plain-text summary of what this product is. Follow the contextual skill exactly. Do not call any tools.`,
             },
           ],
         },

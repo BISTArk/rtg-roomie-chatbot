@@ -1,7 +1,6 @@
 import type { UIMessage } from "ai";
 import type { BrowsingHistoryEntry, PageContext } from "@/lib/system-prompt";
-import { parseAssistantMarkup } from "@/lib/assistant-html";
-import { detectStageFromResponse, stripStageTag } from "@/lib/stage-tag";
+import { detectStageFromResponse } from "@/lib/stage-tag";
 
 export const INTERJECTION_MESSAGE_ID_PREFIX = "interjection-";
 
@@ -53,28 +52,6 @@ export function isInterjectionMessage(messageOrId: UIMessage | string): boolean 
     messageOrId.id.includes(INTERJECTION_MESSAGE_ID_PREFIX) ||
     messageHasInterjectionStage(messageOrId)
   );
-}
-
-function getAssistantText(message: UIMessage): string {
-  return message.parts
-    .filter((part): part is { type: "text"; text: string } => part.type === "text")
-    .map((part) => part.text)
-    .join("");
-}
-
-function hasProductSearchOutput(message: UIMessage): boolean {
-  return message.parts.some((part) => {
-    if (part.type !== "tool-product_search") return false;
-    return (part as { state?: string }).state === "output-available";
-  });
-}
-
-/** Whether a proactive message has content worth showing in the closed-state bubble. */
-export function hasProactiveBubbleContent(message: UIMessage): boolean {
-  const text = stripStageTag(getAssistantText(message)).trim();
-  const parsed = text ? parseAssistantMarkup(text) : null;
-  if (parsed?.prose || (parsed?.actions.length ?? 0) > 0) return true;
-  return hasProductSearchOutput(message);
 }
 
 /** Transient proactive assistant messages shown as closed-state bubbles. */
