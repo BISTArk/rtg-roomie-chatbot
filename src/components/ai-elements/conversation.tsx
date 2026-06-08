@@ -17,7 +17,7 @@ import {
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 70;
 
-const ConversationScrollContext =
+export const ConversationScrollContext =
   createContext<RefObject<HTMLDivElement | null> | null>(null);
 
 export type ConversationRootProps = ComponentProps<"div">;
@@ -114,6 +114,30 @@ export const ConversationEmptyState = ({
 );
 
 export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
+
+export function useConversationAutoScroll(
+  scrollRef: RefObject<HTMLDivElement | null>,
+  deps: unknown[],
+  options: { enabled?: boolean; behavior?: ScrollBehavior } = {}
+) {
+  const { enabled = true, behavior = "smooth" } = options;
+
+  useEffect(() => {
+    if (!enabled) return;
+    const element = scrollRef.current;
+    if (!element) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      element.scrollTo({
+        top: element.scrollHeight,
+        behavior,
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller supplies scroll triggers
+  }, deps);
+}
 
 export const ConversationScrollButton = ({
   className,

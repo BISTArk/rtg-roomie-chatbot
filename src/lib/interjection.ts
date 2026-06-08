@@ -54,6 +54,16 @@ export function isInterjectionMessage(messageOrId: UIMessage | string): boolean 
   );
 }
 
+/** Transient proactive assistant messages shown as closed-state bubbles. */
+export function isTransientProactiveMessage(message: UIMessage): boolean {
+  if (message.role !== "assistant") return false;
+  if (message.id === "welcome") return false;
+  if (message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX)) return true;
+  return getTextParts(message).some(
+    (part) => getTransientStageFromText(part.text) != null
+  );
+}
+
 function isTransientAssistantMessage(message: UIMessage): boolean {
   if (message.role !== "assistant") return false;
   if (message.id === "welcome") return true;

@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { Clock3, Heart, Minus, RefreshCw, Share2 } from "lucide-react";
+import { Clock3, Heart, Minus, RefreshCw } from "lucide-react";
 import { WidgetAvatar } from "./WidgetAvatar";
 import type { WidgetBranding, WidgetTheme } from "@/lib/widget-config";
 
@@ -13,7 +12,6 @@ export function ChatHeader({
   onToggleFavourites,
   isFavouritesOpen,
   favouriteCount,
-  onShare,
   branding,
   theme,
 }: {
@@ -24,18 +22,9 @@ export function ChatHeader({
   onToggleFavourites: () => void;
   isFavouritesOpen: boolean;
   favouriteCount: number;
-  onShare: () => void;
   branding: WidgetBranding;
   theme: WidgetTheme;
 }) {
-  const [copied, setCopied] = useState(false);
-
-  function handleShare() {
-    onShare();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   return (
     <div
       className="flex h-14 shrink-0 items-center justify-between border-b px-4"
@@ -55,28 +44,6 @@ export function ChatHeader({
       </div>
 
       <div className="flex items-center gap-1">
-        <button
-          onClick={handleShare}
-          className="flex h-8 items-center justify-center gap-1 rounded-full px-2 transition-colors"
-          style={{ color: "var(--widget-text-muted)" }}
-          aria-label="Share chat"
-          title="Share chat"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
-            e.currentTarget.style.color = "var(--widget-text)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.color = "var(--widget-text-muted)";
-          }}
-        >
-          {copied ? (
-            <span className="text-[10px] font-semibold">Copied!</span>
-          ) : (
-            <Share2 size={15} />
-          )}
-        </button>
-
         <button
           onClick={onRefresh}
           className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"

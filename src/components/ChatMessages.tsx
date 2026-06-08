@@ -1,7 +1,7 @@
 "use client";
 
 import type { UIMessage } from "ai";
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import { ArrowRightLeft, BarChart3, Check, Heart, ShoppingCart } from "lucide-react";
 import "streamdown/styles.css";
 import {
@@ -10,7 +10,11 @@ import {
   ConversationEmptyState,
   ConversationRoot,
   ConversationScrollButton,
+  ConversationScrollContext,
+  useConversationAutoScroll,
 } from "@/components/ai-elements/conversation";
+
+import { hasUserEngaged, isProactiveBudgetExhausted } from "@/lib/pre-engagement";
 import {
   Message,
   MessageContent,
@@ -20,7 +24,7 @@ import { WidgetAvatar } from "./WidgetAvatar";
 import { parseAssistantMarkup } from "@/lib/assistant-html";
 import { chatQuickSuggestions } from "@/lib/chat-suggestions";
 import {
-  isInterjectionMessage,
+  isTransientProactiveMessage,
   shouldMergeAssistantMessages,
   splitTransientAssistantMessages,
 } from "@/lib/interjection";
@@ -622,20 +626,21 @@ function CompareToolCard({ output }: { output: unknown }) {
   }
 
   return (
-    <Card className="my-0 overflow-hidden py-0 shadow-sm">
-      <CardHeader className="border-b px-4 py-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <ArrowRightLeft size={16} />
-          Product comparison
-        </CardTitle>
-        {data.shopperGoal ? (
-          <CardDescription className="mt-1.5 text-sm leading-5">
-            {data.shopperGoal}
-          </CardDescription>
-        ) : null}
-      </CardHeader>
+    <div className="flex flex-col gap-3">
+      <Card className="my-0 overflow-hidden py-0 shadow-sm">
+        <CardHeader className="border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <ArrowRightLeft size={16} />
+            Product comparison
+          </CardTitle>
+          {data.shopperGoal ? (
+            <CardDescription className="mt-1.5 text-sm leading-5">
+              {data.shopperGoal}
+            </CardDescription>
+          ) : null}
+        </CardHeader>
 
-      <Table className="min-w-[796px] table-fixed">
+        <Table className="min-w-[796px] table-fixed">
         <colgroup>
           <col className="w-[136px]" />
           {products.map((product, index) => (
@@ -738,12 +743,12 @@ function CompareToolCard({ output }: { output: unknown }) {
             ))}
           </TableRow>
         </TableBody>
-      </Table>
+        </Table>
+      </Card>
 
       {data.recommendation?.reason ? (
-        <>
-          <Separator />
-          <CardContent className="space-y-2 bg-accent px-4 py-3">
+        <Card className="my-0 overflow-hidden bg-accent py-0 shadow-sm">
+          <CardContent className="space-y-2 px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <CardTitle className="text-base text-accent-foreground">
                 Our Recommendation
@@ -765,17 +770,17 @@ function CompareToolCard({ output }: { output: unknown }) {
               </Button>
             </div>
             {data.recommendation.productTitle ? (
-              <CardTitle className="text-sm font-medium leading-5">
+              <CardTitle className="text-sm font-medium leading-5 text-accent-foreground">
                 {data.recommendation.productTitle}
               </CardTitle>
             ) : null}
-            <CardDescription className="text-sm leading-6">
+            <CardDescription className="text-sm leading-6 text-accent-foreground/80">
               {data.recommendation.reason}
             </CardDescription>
           </CardContent>
-        </>
+        </Card>
       ) : null}
-    </Card>
+    </div>
   );
 }
 
@@ -1033,6 +1038,26 @@ function FormattedMessage({
   );
 }
 
+function ConversationAutoScroll({
+  messageCount,
+  isStreaming,
+  hasPendingAssistant,
+  suggestionCount,
+}: {
+  messageCount: number;
+  isStreaming: boolean;
+  hasPendingAssistant: boolean;
+  suggestionCount: number;
+}) {
+  const scrollRef = useContext(ConversationScrollContext);
+  useConversationAutoScroll(
+    scrollRef ?? { current: null },
+    [messageCount, isStreaming, hasPendingAssistant, suggestionCount],
+    { behavior: isStreaming ? "auto" : "smooth" }
+  );
+  return null;
+}
+
 export function ChatMessages({
   messages,
   isStreaming,
@@ -1086,8 +1111,16 @@ export function ChatMessages({
       .trim() || `Hi there! I'm ${branding.assistantName}. How can I help?`;
   const hasPendingAssistant =
     isStreaming && groupedMessages[groupedMessages.length - 1]?.role === "user";
-  const hasUserMessages = groupedMessages.some((message) => message.role === "user");
-  const showGreeting = !hasUserMessages && !isStreaming && !hasPendingAssistant;
+  const hasUserMessages = hasUserEngaged(messages);
+  const assistantMessageCount = groupedMessages.filter(
+    (message) => message.role === "assistant"
+  ).length;
+  const showGreeting =
+    !hasUserMessages &&
+    assistantMessageCount === 0 &&
+    !isStreaming &&
+    !hasPendingAssistant;
+  const proactiveBudgetSpent = isProactiveBudgetExhausted(messages);
 
   return (
     <ConversationRoot
@@ -1098,6 +1131,12 @@ export function ChatMessages({
         className="chat-messages"
         style={{ overscrollBehavior: "contain" }}
       >
+        <ConversationAutoScroll
+          messageCount={groupedMessages.length}
+          isStreaming={isStreaming}
+          hasPendingAssistant={hasPendingAssistant}
+          suggestionCount={suggestions.length}
+        />
         <ConversationContent
           className={cn(
             "gap-3 px-4 py-3",
@@ -1124,7 +1163,7 @@ export function ChatMessages({
           ) : (
             <>
               {groupedMessages.map((msg, index) =>
-                isInterjectionMessage(msg) ? (
+                isTransientProactiveMessage(msg) ? (
                   <InterjectionMessageBubble
                     key={msg.id}
                     message={msg}
@@ -1151,7 +1190,7 @@ export function ChatMessages({
                   />
                 )
               )}
-              {!isStreaming && suggestions.length > 0 ? (
+              {!isStreaming && suggestions.length > 0 && !proactiveBudgetSpent ? (
                 <NextQuestionSuggestions
                   suggestions={suggestions}
                   onSelect={onSuggestionSelect}

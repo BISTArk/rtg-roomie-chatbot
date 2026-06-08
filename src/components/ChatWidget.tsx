@@ -10,7 +10,7 @@ import {
   type UIMessageChunk,
 } from "ai";
 import { ArrowRightLeft, X } from "lucide-react";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { ChatHeader } from "./ChatHeader";
 import { ChatFavourites } from "./ChatFavourites";
 import { ChatHistory } from "./ChatHistory";
@@ -77,7 +77,7 @@ import {
   dismissInterjection,
   INTERJECTION_DISMISSED_KEY,
   isInterjectionDismissed,
-  isInterjectionMessage,
+  isTransientProactiveMessage,
   pickInterjectionType,
   STANDALONE_INTERJECTION_DELAY_MS,
 } from "@/lib/interjection";
@@ -86,6 +86,13 @@ import { Button } from "@/components/ui/button";
 import type { SessionHistoryItem, TenantBootstrap } from "@/lib/platform-types";
 import type { SelectableProductCard } from "@/lib/product-types";
 import { hasPendingToolCalls, stripUnresolvedToolParts } from "@/lib/message-tools";
+import {
+  hasUserEngaged,
+  initProactiveAttemptCount,
+  isProactiveBudgetExhausted,
+  recordProactiveAttempt,
+  resetProactiveAttemptCount,
+} from "@/lib/pre-engagement";
 
 export type ChatMessage = PersistedChatMessage;
 
@@ -335,6 +342,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const hostOriginRef = useRef(getHostOrigin());
   const requestExtrasRef = useRef<Record<string, unknown> | null>(null);
   const isOpenRef = useRef(isOpen);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const interjectionRef = useRef<HTMLDivElement>(null);
   // Durable flag: set when user clicks the in-chat refresh icon. Blocks
   // "Welcome back, you were looking for..." greetings in both the same
   // session (handleOpen → generateReturningGreeting) and future sessions
@@ -462,6 +471,22 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
   useEffect(() => {
     isOpenRef.current = isOpen;
+    if (isOpen) {
+      setShowInterjection(false);
+      setInterjectionContent(null);
+    } else {
+      const lastTransient = [...messagesRef.current]
+        .reverse()
+        .find(isTransientProactiveMessage);
+      if (lastTransient) {
+        const text = stripStageTag(getTextFromUIMessage(lastTransient)).trim();
+        const parsed = text ? parseAssistantMarkup(text) : null;
+        if (parsed?.prose) {
+          setInterjectionContent(parsed);
+          setShowInterjection(true);
+        }
+      }
+    }
     // Tell embed.js to resize the iframe
     if (embed && typeof window !== "undefined" && window.parent !== window) {
       window.parent.postMessage(
@@ -470,13 +495,65 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       );
     }
   }, [isOpen, embed]);
-  useEffect(() => {
+
+  const reportEmbedPeekSize = useCallback(() => {
     if (!embed || typeof window === "undefined" || window.parent === window) return;
+
+    const visible = showInterjection && !isOpen;
+    if (!visible) {
+      window.parent.postMessage({ type: "shop-assist-widget-peek", visible: false }, "*");
+      return;
+    }
+
+    let minTop = window.innerHeight;
+    const launcher = launcherRef.current;
+    if (launcher) {
+      minTop = Math.min(minTop, launcher.getBoundingClientRect().top);
+    }
+
+    const interjection = interjectionRef.current;
+    if (interjection) {
+      const rect = interjection.getBoundingClientRect();
+      // Dismiss button sits slightly above the card (-top-2).
+      minTop = Math.min(minTop, rect.top - 8);
+    }
+
+    const height = Math.ceil(window.innerHeight - minTop + 12);
     window.parent.postMessage(
-      { type: "shop-assist-widget-peek", visible: showInterjection && !isOpen },
+      { type: "shop-assist-widget-peek", visible: true, height },
       "*"
     );
   }, [embed, showInterjection, isOpen]);
+
+  useLayoutEffect(() => {
+    reportEmbedPeekSize();
+    const frame = requestAnimationFrame(() => {
+      reportEmbedPeekSize();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [reportEmbedPeekSize, interjectionContent]);
+
+  useEffect(() => {
+    if (!embed || !showInterjection || isOpen) return;
+    const interjection = interjectionRef.current;
+    if (!interjection || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      reportEmbedPeekSize();
+    });
+    observer.observe(interjection);
+
+    function handleResize() {
+      reportEmbedPeekSize();
+    }
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [embed, showInterjection, isOpen, reportEmbedPeekSize]);
+
   useEffect(() => { visitorProfileRef.current = visitorProfile; }, [visitorProfile]);
   useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
   useEffect(() => { pageContextRef.current = pageContext; }, [pageContext]);
@@ -533,6 +610,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     onFinish: async ({ messages: completedMessages, finishReason, isAbort, isError }) => {
       if (isAbort || isError || finishReason === "tool-calls") return;
+      if (isProactiveBudgetExhausted(completedMessages)) return;
 
       try {
         const parsed = await fetchSuggestions(
@@ -551,7 +629,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
   useEffect(() => {
     messagesRef.current = messages;
-  }, [messages]);
+    if (loaded && hasUserEngaged(messages)) {
+      resetProactiveAttemptCount();
+    }
+  }, [messages, loaded]);
 
   const displayMessages: ChatMessage[] = messages.map(uiMessageToChatMessage);
 
@@ -626,6 +707,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           setWidgetConfig(nextConfig);
 
           initFromBridge(bootstrap.session.messages || data.chatMessages || null, true);
+          initProactiveAttemptCount({
+            embed: true,
+            count:
+              typeof data.proactiveAttemptCount === "number"
+                ? data.proactiveAttemptCount
+                : 0,
+          });
           initProfileFromBridge(bootstrap.session.visitorProfile || data.visitorProfile || null, true);
           initFavouritesFromBridge(
             Array.isArray(data.favourites) ? data.favourites : null,
@@ -672,6 +760,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           });
           setWidgetConfig(nextConfig);
           initFromBridge(data.chatMessages || null, true);
+          initProactiveAttemptCount({
+            embed: true,
+            count:
+              typeof data.proactiveAttemptCount === "number"
+                ? data.proactiveAttemptCount
+                : 0,
+          });
           initProfileFromBridge(data.visitorProfile || null, true);
           initFavouritesFromBridge(
             Array.isArray(data.favourites) ? data.favourites : null,
@@ -692,50 +787,37 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           }));
         }
 
-        // Handle pending product summary (Behavior A — user clicked a
-        // product card inside the chat). Record the product name so State 2
-        // won't also fire a contextual message for the same product.
+        // Pending product: user clicked a card in chat and landed on the PDP.
+        // Show the product summary as a closed-state bubble — never auto-open
+        // or inject a fake user message.
         if (data.pendingProduct && data.pendingProduct.productName) {
-          lastContextualProductRef.current = data.pendingProduct.productName;
-          lastContextualAtRef.current = Date.now();
-          setIsOpen(true);
+          const initialCtx = (data.pageContext || {}) as PageContext;
           setTimeout(() => {
-            // Natural phrasing — how an actual customer would ask about the
-            // product they just clicked. The AI already has the conversation
-            // history and knows to include Add-to-Cart / Compare tiles for
-            // product responses (per recommendation skill), so we don't need
-            // robotic instructions in the user message.
-            handleSendRef.current?.(
-              `Tell me more about the ${data.pendingProduct.productName}`
-            );
-          }, 800);
+            scheduleContextualForPdpRef.current?.({
+              ...initialCtx,
+              page: "pdp",
+              productName: data.pendingProduct.productName,
+            });
+          }, 300);
         }
 
-        // Auto-open the widget when a shared chat link is loaded
-        if (data.isSharedChat) {
-          setIsOpen(true);
-        }
-
-        // Restore previous open/closed state across page navigations
+        // Restore previous open/closed state across page navigations.
         if (data.widgetOpen) {
+          isOpenRef.current = true;
           setIsOpen(true);
         }
 
-        // State 4: Fresh session (all tabs were closed). Fire immediately so
-        // the AI greeting replaces the static welcome on first paint.
+        // State 4: Fresh session greeting — bubble when closed, never auto-open.
         if (data.isNewSession && !data.pendingProduct && !data.isSharedChat) {
           queueMicrotask(() => {
             triggerNewSessionGreetingRef.current?.();
           });
         }
 
-        // State 2 on full page load: Shopify themes typically do full page
-        // loads for product clicks, so SHOP_ASSIST_PAGE_CONTEXT_MESSAGE won't fire
-        // for the initial navigation. Schedule contextual here too.
+        // State 2 on full page load: schedule PDP commentary whether chat is
+        // open or closed. Renders in-panel when open, bubble when minimized.
         const initialCtx = data.pageContext as PageContext | undefined;
-        const chatWillBeOpen = data.widgetOpen || data.isSharedChat;
-        if (chatWillBeOpen && !data.pendingProduct && initialCtx) {
-          // Small delay so refs are settled and setIsOpen has flushed
+        if (initialCtx?.page === "pdp" && initialCtx.productName && !data.pendingProduct) {
           setTimeout(() => scheduleContextualForPdpRef.current?.(initialCtx), 300);
         }
 
@@ -864,6 +946,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setTenantToken("");
         setWidgetConfig(resolveWidgetConfig(windowConfig));
         initFromBridge(null, false);
+        initProactiveAttemptCount({ embed: false });
         initProfileFromBridge(null, false);
         setMessages([buildSystemNoticeUi(message)]);
         setLoaded(true);
@@ -911,6 +994,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         );
         setWidgetConfig(nextConfig);
         initFromBridge(bootstrap.session.messages || null, false);
+        initProactiveAttemptCount({ embed: false });
         initProfileFromBridge(bootstrap.session.visitorProfile || null, false);
         initFavouritesFromBridge(null, false);
         setFavourites(loadFavourites());
@@ -939,6 +1023,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         const nextConfig = resolveWidgetConfig(windowConfig);
         setWidgetConfig(nextConfig);
         initFromBridge(null, false);
+        initProactiveAttemptCount({ embed: false });
         initProfileFromBridge(null, false);
         initFavouritesFromBridge(null, false);
         setFavourites(loadFavourites());
@@ -1127,6 +1212,35 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     }
   }, []);
 
+  const presentProactiveAssistantMessage = useCallback((message: UIMessage) => {
+    const storedMessage: UIMessage = {
+      ...message,
+      id: createInterjectionMessageId(message.id),
+    };
+
+    const nextMessages = [
+      ...messagesRef.current.filter((entry) => !isTransientProactiveMessage(entry)),
+      storedMessage,
+    ];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+
+    if (!hasUserEngaged(nextMessages)) {
+      recordProactiveAttempt();
+    }
+
+    const text = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+    const parsed = text ? parseAssistantMarkup(text) : null;
+    if (parsed?.prose && !isOpenRef.current) {
+      setInterjectionContent(parsed);
+      setShowInterjection(true);
+      return;
+    }
+
+    setShowInterjection(false);
+    setInterjectionContent(null);
+  }, [setMessages]);
+
   const consumeAssistantStream = useCallback(
     async (stream: ReadableStream<UIMessageChunk>) => {
       const assistantId = generateId();
@@ -1163,6 +1277,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
   // Generate personalized greeting for returning visitors when widget opens
   const generateReturningGreeting = useCallback(async () => {
+    if (isProactiveBudgetExhausted(messagesRef.current)) return;
     const profile = loadVisitorProfile();
     if (profile.visitCount <= 1 && profile.viewedProducts.length === 0) {
       return;
@@ -1188,6 +1303,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         abortSignal: undefined,
       });
       await consumeAssistantStream(chunkStream);
+      if (!hasUserEngaged(messagesRef.current)) {
+        recordProactiveAttempt();
+      }
     } catch {
       setMessages([welcomeUi]);
     }
@@ -1220,6 +1338,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         console.log(`[proactive] ${which} skipped: complaint-mode`);
         return false;
       }
+      if (isProactiveBudgetExhausted(messagesRef.current)) {
+        console.log(`[proactive] ${which} skipped: proactive-budget-spent`);
+        return false;
+      }
       const result = proactive.canFire(which, pageContextRef.current, options);
       if (!result.allowed) {
         console.log(`[proactive] ${which} skipped: ${result.reason}`);
@@ -1244,7 +1366,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     const productAtNavigation = ctx.productName;
     contextualDwellTimerRef.current = setTimeout(() => {
       contextualDwellTimerRef.current = null;
-      if (!isOpenRef.current) return;
       const currentCtx = pageContextRef.current;
       if (!currentCtx || currentCtx.productName !== productAtNavigation) return;
       if (Date.now() - lastContextualAtRef.current < CONTEXTUAL_COOLDOWN_MS) return;
@@ -1272,11 +1393,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         messages: messages,
         abortSignal: new AbortController().signal,
       });
-      await consumeAssistantStream(chunkStream);
+      const commentary = await readAssistantStream(chunkStream);
+      if (!commentary) return;
+      presentProactiveAssistantMessage(commentary);
     } catch (err) {
       console.log("[proactive] contextual API call failed:", err);
     }
-  }, [transport, messages, gatedFire, consumeAssistantStream]);
+  }, [transport, messages, gatedFire, readAssistantStream, presentProactiveAssistantMessage]);
 
   // State 1: Fire re-engagement after 20min idle. Requires prior conversation.
   const triggerReengagement = useCallback(async () => {
@@ -1321,26 +1444,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       });
       const interjection = await readAssistantStream(chunkStream);
       if (!interjection) return;
-
-      const interjectionMessage: UIMessage = {
-        ...interjection,
-        id: createInterjectionMessageId(interjection.id),
-      };
-      setMessages((prev) => [
-        ...prev.filter((message) => !isInterjectionMessage(message)),
-        interjectionMessage,
-      ]);
-
-      const text = stripStageTag(getTextFromUIMessage(interjectionMessage)).trim();
-      const parsed = text ? parseAssistantMarkup(text) : null;
-      if (parsed?.prose && !isOpenRef.current) {
-        setInterjectionContent(parsed);
-        setShowInterjection(true);
-      }
+      presentProactiveAssistantMessage(interjection);
     } catch {
       /* swallow */
     }
-  }, [transport, messages, gatedFire, readAssistantStream]);
+  }, [transport, messages, gatedFire, readAssistantStream, presentProactiveAssistantMessage]);
 
   // State 4: Greet on fresh session. For returning customers with prior chat
   // history, the greeting is APPENDED (history stays). For new customers with
@@ -1393,10 +1501,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         profile.visitCount > 1 ||
         profile.viewedProducts.length > 0);
     setIsNewSessionPhase(true);
-    // Auto-open the chat so the greeting is actually visible. Otherwise
-    // the stream lands silently inside a closed pill and the visitor
-    // never sees it.
-    setIsOpen(true);
     try {
       if (!hasPriorChat) {
         // New customer: start fresh with no welcome (skill produces the intro)
@@ -1418,11 +1522,14 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         messages: historyForApi,
         abortSignal: new AbortController().signal,
       });
-      await consumeAssistantStream(chunkStream);
+      const greeting = await readAssistantStream(chunkStream);
+      if (greeting) {
+        presentProactiveAssistantMessage(greeting);
+      }
     } catch {
       if (!hasPriorChat) setMessages([welcomeUi]);
     }
-  }, [transport, setMessages, gatedFire, welcomeUi, consumeAssistantStream]);
+  }, [transport, setMessages, gatedFire, welcomeUi, readAssistantStream, presentProactiveAssistantMessage]);
 
   // Wire up the refs so the message handler (stable across renders) can
   // call the latest version of these callbacks.
@@ -1522,6 +1629,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     setSelectedProducts([]);
     setSuggestions([]);
     setHumanMode(false);
+    resetProactiveAttemptCount();
     setSessionId(nextSessionId);
     if (embed && typeof window !== "undefined" && window.parent !== window) {
       window.parent.postMessage(
@@ -1545,70 +1653,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       void refreshHistorySessions();
     }
   }, [setMessages, embed, refreshHistorySessions, showHistory, welcomeUi]);
-
-  const handleShare = useCallback(async () => {
-    const shareableMessages = displayMessages.filter((m) => m.id !== "welcome");
-    if (shareableMessages.length === 0) return;
-
-    try {
-      let url = "";
-      const createShortLink = await fetch("/api/share", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-tenant-token": tenantTokenRef.current,
-        },
-        body: JSON.stringify({
-          tenantKey: tenantKeyRef.current,
-          messages: shareableMessages.map((m) => ({ role: m.role, text: m.text })),
-        }),
-      });
-
-      if (createShortLink.ok) {
-        const payload = (await createShortLink.json()) as { id?: string };
-        if (payload.id && typeof window !== "undefined") {
-          const shared = new URL(window.location.href);
-          shared.searchParams.set("c", payload.id);
-          url = shared.toString();
-        }
-      }
-
-      if (!url) {
-        const json = JSON.stringify(
-          shareableMessages.map((m) => ({ role: m.role, text: m.text }))
-        );
-        const stream = new Blob([json]).stream().pipeThrough(
-          new CompressionStream("gzip")
-        );
-        const buffer = await new Response(stream).arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-        const encoded = btoa(binary)
-          .replace(/\+/g, "-")
-          .replace(/\//g, "_")
-          .replace(/=+$/, "");
-        const shared = new URL(window.location.href);
-        shared.searchParams.set("chat", encoded);
-        url = shared.toString();
-      }
-
-      try {
-        await navigator.clipboard.writeText(url);
-      } catch {
-        const el = document.createElement("textarea");
-        el.value = url;
-        el.style.position = "fixed";
-        el.style.opacity = "0";
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand("copy");
-        document.body.removeChild(el);
-      }
-    } catch {
-      /* share failed silently */
-    }
-  }, [displayMessages]);
 
   const triggerHandoff = useCallback(async () => {
     // 1. Show transfer message
@@ -1719,7 +1763,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       setShowInterjection(false);
       setInterjectionContent(null);
       setMessages((prev) =>
-        prev.filter((message) => !isInterjectionMessage(message))
+        prev.filter((message) => !isTransientProactiveMessage(message))
       );
       setIsOpen(true);
       void handleSend(prompt);
@@ -1818,6 +1862,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         <>
           {showInterjection && interjectionContent?.prose ? (
             <div
+              ref={interjectionRef}
               role="status"
               className={`interjection-enter fixed bottom-[88px] z-50 max-w-[min(320px,calc(100vw-48px))] rounded-2xl px-5 py-4 text-[15px] leading-relaxed shadow-[var(--widget-shadow)] sm:bottom-[96px] ${launcherPositionClass} ${embed ? "pointer-events-auto" : ""}`}
               style={{
@@ -1861,7 +1906,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                   setShowInterjection(false);
                   setInterjectionContent(null);
                   setMessages((prev) =>
-                    prev.filter((message) => !isInterjectionMessage(message))
+                    prev.filter((message) => !isTransientProactiveMessage(message))
                   );
                   dismissInterjection(getScopedStorageKey(INTERJECTION_DISMISSED_KEY));
                 }}
@@ -1873,6 +1918,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
             </div>
           ) : null}
           <button
+            ref={launcherRef}
             onClick={handleOpen}
             className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${embed ? embedLauncherClass : launcherPositionClass} ${embed ? "pointer-events-auto max-w-[calc(100%-16px)]" : ""}`}
             style={{
@@ -1931,7 +1977,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
               }
               isFavouritesOpen={showFavourites}
               favouriteCount={favourites.length}
-              onShare={handleShare}
               branding={widgetConfig.branding}
               theme={widgetConfig.theme}
             />

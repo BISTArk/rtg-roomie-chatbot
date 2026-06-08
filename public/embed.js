@@ -540,6 +540,7 @@
       setSessionVal(scopedSessionKey("started_at"), String(sessionStartedAt));
       setSessionVal(scopedSessionKey("state3_count"), "0");
       setSessionVal(scopedSessionKey("last_interjection_at"), "0");
+      setSessionVal(scopedSessionKey("proactive_attempt_count"), "0");
     } else {
       sessionStartedAt = parseInt(getSessionVal(scopedSessionKey("started_at")) || String(Date.now()), 10);
     }
@@ -574,13 +575,17 @@
       (widgetConfig.branding && (widgetConfig.branding.headerTitle || widgetConfig.branding.launcherLabel))
       || "Shopping Assistant";
     // Start small (just enough for the toggle button), expand when widget opens
+    var CLOSED_HEIGHT = 90;
+    var PEEK_MIN_HEIGHT = 280;
+    var peekHeight = PEEK_MIN_HEIGHT;
+
     var CLOSED_STYLE = [
       "position:fixed",
       "bottom:0",
       getEdgeStyle(placement),
       placement === "bottom-left" ? "right:auto" : "left:auto",
       "width:min(300px,calc(100vw - 16px))",
-      "height:90px",
+      "height:" + CLOSED_HEIGHT + "px",
       "max-width:calc(100vw - 16px)",
       "border:0",
       "z-index:2147483647",
@@ -589,20 +594,26 @@
       "overflow:hidden",
     ].join(";");
 
-    var PEEK_STYLE = [
-      "position:fixed",
-      "bottom:0",
-      getEdgeStyle(placement),
-      placement === "bottom-left" ? "right:auto" : "left:auto",
-      "width:min(360px,calc(100vw - 16px))",
-      "height:240px",
-      "max-width:calc(100vw - 16px)",
-      "border:0",
-      "z-index:2147483647",
-      "background:transparent",
-      "transition:width 0.3s ease, height 0.3s ease",
-      "overflow:hidden",
-    ].join(";");
+    function buildPeekStyle(height) {
+      var resolvedHeight = Math.max(
+        PEEK_MIN_HEIGHT,
+        Math.min(height || PEEK_MIN_HEIGHT, window.innerHeight - 16)
+      );
+      return [
+        "position:fixed",
+        "bottom:0",
+        getEdgeStyle(placement),
+        placement === "bottom-left" ? "right:auto" : "left:auto",
+        "width:min(360px,calc(100vw - 16px))",
+        "height:" + resolvedHeight + "px",
+        "max-width:calc(100vw - 16px)",
+        "border:0",
+        "z-index:2147483647",
+        "background:transparent",
+        "transition:width 0.3s ease, height 0.3s ease",
+        "overflow:hidden",
+      ].join(";");
+    }
 
     var OPEN_STYLE = [
       "position:fixed",
@@ -627,7 +638,7 @@
     var peekVisible = false;
 
     function getFrameStyle(open, visible) {
-      var style = open ? OPEN_STYLE : (peekVisible ? PEEK_STYLE : CLOSED_STYLE);
+      var style = open ? OPEN_STYLE : (peekVisible ? buildPeekStyle(peekHeight) : CLOSED_STYLE);
       if (visible) return style;
       return style + ";opacity:0;visibility:hidden;pointer-events:none";
     }
@@ -667,6 +678,7 @@
           widgetOpen: wasOpen,
           isNewSession: isNewSession,
           suppressReturning: safeGet(scopedStorageKey(STORAGE.SUPPRESS_RETURNING)) === "1",
+          proactiveAttemptCount: getProactiveAttemptCount(),
           tenantKey: tenantKey,
           storageNamespace: storageNamespace,
           hostOrigin: window.location.origin,
@@ -777,6 +789,12 @@
           safeRemove(scopedStorageKey(STORAGE.SUPPRESS_RETURNING));
           break;
 
+        case "shop-assist-save-proactive-attempts":
+          if (typeof e.data.count === "number") {
+            setProactiveAttemptCount(e.data.count);
+          }
+          break;
+
         case "shop-assist-widget-open":
           peekVisible = false;
           iframe.setAttribute("style", getFrameStyle(true, renderReady));
@@ -801,6 +819,11 @@
 
         case "shop-assist-widget-peek":
           peekVisible = !!e.data.visible && !chatIsOpen;
+          if (typeof e.data.height === "number" && e.data.height > 0) {
+            peekHeight = e.data.height;
+          } else if (!peekVisible) {
+            peekHeight = PEEK_MIN_HEIGHT;
+          }
           iframe.setAttribute("style", getFrameStyle(chatIsOpen, renderReady));
           break;
 
@@ -1029,9 +1052,50 @@
       return true;
     }
 
+    function getProactiveAttemptCount() {
+      return parseInt(getSessionVal(scopedSessionKey("proactive_attempt_count")) || "0", 10);
+    }
+    function setProactiveAttemptCount(count) {
+      setSessionVal(
+        scopedSessionKey("proactive_attempt_count"),
+        String(Math.max(0, count))
+      );
+    }
+
+    function chatHasUserEngagement(chatMessages) {
+      if (!Array.isArray(chatMessages)) return false;
+      for (var i = 0; i < chatMessages.length; i++) {
+        var message = chatMessages[i];
+        if (!message) continue;
+        if (message.role === "user") return true;
+        if (message.role !== "assistant" || !Array.isArray(message.parts)) continue;
+        for (var j = 0; j < message.parts.length; j++) {
+          var part = message.parts[j];
+          if (
+            part &&
+            part.type === "tool-ask_user_question" &&
+            part.state === "output-available"
+          ) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // Stop unsolicited interjections after 3 proactive AI responses if the
+    // shopper never engaged — saves tokens on visitors who ignore the widget.
+    var PROACTIVE_ATTEMPT_LIMIT = 3;
+    function isProactiveBudgetSpent() {
+      var chatMessages = safeJSON(safeGet(scopedStorageKey(STORAGE.CHAT))) || [];
+      if (chatHasUserEngagement(chatMessages)) return false;
+      return getProactiveAttemptCount() >= PROACTIVE_ATTEMPT_LIMIT;
+    }
+
     function checkState3() {
       if (chatIsOpen || !ready) return;
       if (!isSafePageForInterjection()) return; // Skip cart/checkout
+      if (isProactiveBudgetSpent()) return;
       var count = getState3Count();
       var now = Date.now();
 
