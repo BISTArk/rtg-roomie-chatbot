@@ -4,6 +4,7 @@ import { ShopifyAuthRedirect } from "@/components/ShopifyAuthRedirect";
 import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { getShopifyAppConfig, normalizeShopifyShopDomain } from "@/lib/shopify";
+import { ensureTenantShopifyCatalogSynced } from "@/lib/shopify-catalog-sync";
 import { getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
 import Script from "next/script";
 
@@ -30,6 +31,11 @@ export default async function Home({
       );
     }
 
+    const appConfig = getShopifyAppConfig();
+    const catalogSync = await ensureTenantShopifyCatalogSynced({
+      tenantId: tenant.tenantId,
+      appOrigin: appConfig.appUrl,
+    });
     const adminAuthenticated = await isAdminAuthenticated();
     const tenantKey = adminAuthenticated ? tenant.tenantKey : "";
     const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
@@ -41,6 +47,7 @@ export default async function Home({
     return (
       <ShopifyInstalledView
         shop={shop}
+        catalogSync={catalogSync}
         adminAuthenticated={adminAuthenticated}
         tenantKey={tenantKey}
         enableEmbedUrl={enableEmbedUrl}

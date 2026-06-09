@@ -1,10 +1,13 @@
 import { buildCatalogDatasetFromShopify, getShopifyAppConfig } from "@/lib/shopify";
 import {
   createCatalogVersion,
+  getActiveCatalogDataset,
   getTenantShopifyInstallation,
   listCatalogSources,
   updateCatalogSourceSyncStamp,
 } from "@/lib/tenant-platform";
+
+export type CatalogSyncStatus = "ready" | "failed";
 
 export async function syncTenantShopifyCatalog(input: {
   tenantId: string;
@@ -44,4 +47,23 @@ export async function syncTenantShopifyCatalog(input: {
     sourceId: source.id,
     rowCount: dataset.rows.length,
   };
+}
+
+/** Sync Shopify catalog when the store is installed but has no active snapshot yet. */
+export async function ensureTenantShopifyCatalogSynced(input: {
+  tenantId: string;
+  appOrigin: string;
+}): Promise<CatalogSyncStatus> {
+  const existing = await getActiveCatalogDataset(input.tenantId);
+  if (existing) {
+    return "ready";
+  }
+
+  try {
+    await syncTenantShopifyCatalog(input);
+    return "ready";
+  } catch (error) {
+    console.error("[shopify catalog] ensure sync failed:", error);
+    return "failed";
+  }
 }

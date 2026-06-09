@@ -1,5 +1,6 @@
 import { isAdminAuthenticated } from "@/lib/admin-auth";
-import { normalizeShopifyShopDomain } from "@/lib/shopify";
+import { getShopifyAppConfig, normalizeShopifyShopDomain } from "@/lib/shopify";
+import { ensureTenantShopifyCatalogSynced } from "@/lib/shopify-catalog-sync";
 import { getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
 import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
 
@@ -13,11 +14,17 @@ export default async function ShopifyInstalledPage({
     catalogSync?: string;
   };
   const shop = normalizeShopifyShopDomain(params.shop) || "your Shopify store";
-  const catalogSync = params.catalogSync || "";
   const adminAuthenticated = await isAdminAuthenticated();
-  const tenant = adminAuthenticated && shop !== "your Shopify store"
-    ? await getTenantByShopifyShopDomain(shop)
-    : null;
+  const tenant = shop !== "your Shopify store" ? await getTenantByShopifyShopDomain(shop) : null;
+  let catalogSync = params.catalogSync || "";
+
+  if (tenant?.shopifyInstallation?.status === "installed") {
+    const ensured = await ensureTenantShopifyCatalogSynced({
+      tenantId: tenant.tenantId,
+      appOrigin: getShopifyAppConfig().appUrl,
+    });
+    catalogSync = ensured;
+  }
   const tenantKey = tenant?.tenantKey || "";
   const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
   const enableEmbedUrl =
