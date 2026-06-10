@@ -490,81 +490,102 @@ async function seedDefaultTenant(): Promise<void> {
   await ensurePlatformSchema();
 
   await withDb(async (client) => {
-    const existing = await client.query<{ id: string }>(
-      `SELECT id FROM tenants WHERE tenant_key = $1 LIMIT 1`,
-      [DEFAULT_TENANT_KEY]
-    );
-    if (existing.rows.length === 0) {
-      const tenantId = randomUUID();
-      await client.query(
-        `INSERT INTO tenants (
-          id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, system_prompt_text, skill_prompts_json, prompts_seeded
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11::jsonb,$12)`,
-        [
-          tenantId,
-          DEFAULT_TENANT_KEY,
-          FALLBACK_TENANT.name,
-          FALLBACK_TENANT.storageNamespace,
-          FALLBACK_TENANT.appName,
-          FALLBACK_TENANT.appUrl,
-          JSON.stringify(FALLBACK_TENANT.theme),
-          JSON.stringify(FALLBACK_TENANT.branding),
-          JSON.stringify(FALLBACK_TENANT.prompt),
-          DEFAULT_SEEDED_SYSTEM_PROMPT,
-          JSON.stringify(DEFAULT_SEEDED_SKILL_PROMPTS),
-          true,
-        ]
-      );
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('seed-default-tenant'))`);
 
-      for (const hostname of FALLBACK_TENANT.allowedDomains) {
+      const existing = await client.query<{ id: string }>(
+        `SELECT id FROM tenants WHERE tenant_key = $1 LIMIT 1`,
+        [DEFAULT_TENANT_KEY]
+      );
+      if (existing.rows.length === 0) {
+        const tenantId = randomUUID();
         await client.query(
-          `INSERT INTO tenant_domains (id, tenant_id, hostname) VALUES ($1, $2, $3)`,
-          [randomUUID(), tenantId, hostname]
+          `INSERT INTO tenants (
+          id, tenant_key, name, storage_namespace, app_name, app_url, theme_json, branding_json, prompt_json, system_prompt_text, skill_prompts_json, prompts_seeded
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11::jsonb,$12)
+        ON CONFLICT (tenant_key) DO NOTHING`,
+          [
+            tenantId,
+            DEFAULT_TENANT_KEY,
+            FALLBACK_TENANT.name,
+            FALLBACK_TENANT.storageNamespace,
+            FALLBACK_TENANT.appName,
+            FALLBACK_TENANT.appUrl,
+            JSON.stringify(FALLBACK_TENANT.theme),
+            JSON.stringify(FALLBACK_TENANT.branding),
+            JSON.stringify(FALLBACK_TENANT.prompt),
+            DEFAULT_SEEDED_SYSTEM_PROMPT,
+            JSON.stringify(DEFAULT_SEEDED_SKILL_PROMPTS),
+            true,
+          ]
         );
+
+        const seededTenant = await client.query<{ id: string }>(
+          `SELECT id FROM tenants WHERE tenant_key = $1 LIMIT 1`,
+          [DEFAULT_TENANT_KEY]
+        );
+        const seededTenantId = seededTenant.rows[0]?.id;
+        if (!seededTenantId) {
+          await client.query("COMMIT");
+          return;
+        }
+
+        for (const hostname of FALLBACK_TENANT.allowedDomains) {
+          await client.query(
+            `INSERT INTO tenant_domains (id, tenant_id, hostname) VALUES ($1, $2, $3)
+             ON CONFLICT (tenant_id, hostname) DO NOTHING`,
+            [randomUUID(), seededTenantId, hostname]
+          );
+        }
+
+        const fullExecution = await queryFullCatalog();
+        const headers = fullExecution.rows.length > 0 ? Object.keys(fullExecution.rows[0]) : [];
+        const rows = fullExecution.rows.map((row: Record<string, string | number | null>) =>
+          Object.fromEntries(
+            Object.entries(row).map(([key, value]) => [key, value == null ? "" : String(value)])
+          )
+        );
+        const dataset: CatalogDataset = {
+          headers,
+          rows,
+          fullCatalogText: formatRetrievedCatalog(fullExecution, {
+            intent: {
+              mode: "product_search",
+              intent_summary: "Default seeded full catalog snapshot.",
+              category: null,
+              product_names: [],
+              brands: [],
+              mattress_sizes: [],
+              mattress_types: [],
+              sleep_positions: [],
+              support_levels: [],
+              temperature_management: [],
+              comfort: [],
+              discount_only: false,
+              price_min: null,
+              price_max: null,
+              sort: "relevance",
+              limit: rows.length,
+            },
+          }),
+        };
+        await insertCatalogVersion(client, {
+          tenantId: seededTenantId,
+          sourceId: null,
+          sourceType: "excel",
+          label: "Seeded RTG catalog",
+          dataset,
+          activate: true,
+        });
       }
 
-      const fullExecution = await queryFullCatalog();
-      const headers = fullExecution.rows.length > 0 ? Object.keys(fullExecution.rows[0]) : [];
-      const rows = fullExecution.rows.map((row: Record<string, string | number | null>) =>
-        Object.fromEntries(
-          Object.entries(row).map(([key, value]) => [key, value == null ? "" : String(value)])
-        )
-      );
-      const dataset: CatalogDataset = {
-        headers,
-        rows,
-        fullCatalogText: formatRetrievedCatalog(fullExecution, {
-          intent: {
-            mode: "product_search",
-            intent_summary: "Default seeded full catalog snapshot.",
-            category: null,
-            product_names: [],
-            brands: [],
-            mattress_sizes: [],
-            mattress_types: [],
-            sleep_positions: [],
-            support_levels: [],
-            temperature_management: [],
-            comfort: [],
-            discount_only: false,
-            price_min: null,
-            price_max: null,
-            sort: "relevance",
-            limit: rows.length,
-          },
-        }),
-      };
-      await insertCatalogVersion(client, {
-        tenantId,
-        sourceId: null,
-        sourceType: "excel",
-        label: "Seeded RTG catalog",
-        dataset,
-        activate: true,
-      });
+      await seedTenantPromptDefaults(client);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
     }
-
-    await seedTenantPromptDefaults(client);
   });
 }
 
@@ -2021,16 +2042,27 @@ export async function createCatalogVersion(input: {
 }): Promise<string> {
   if (!hasDatabase()) throw new Error("DATABASE_URL is required to create catalog versions.");
   await ensurePlatformSchema();
-  return withDb(async (client) =>
-    insertCatalogVersion(client, {
-      tenantId: input.tenantId,
-      sourceId: input.sourceId,
-      sourceType: input.sourceType,
-      label: input.label,
-      dataset: input.dataset,
-      activate: input.activate !== false,
-    })
-  );
+  return withDb(async (client) => {
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        `catalog-sync:${input.tenantId}`,
+      ]);
+      const id = await insertCatalogVersion(client, {
+        tenantId: input.tenantId,
+        sourceId: input.sourceId,
+        sourceType: input.sourceType,
+        label: input.label,
+        dataset: input.dataset,
+        activate: input.activate !== false,
+      });
+      await client.query("COMMIT");
+      return id;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  });
 }
 
 export async function activateCatalogVersion(tenantId: string, versionId: string): Promise<void> {
@@ -2039,6 +2071,9 @@ export async function activateCatalogVersion(tenantId: string, versionId: string
   await withDb(async (client) => {
     await client.query("BEGIN");
     try {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        `catalog-sync:${tenantId}`,
+      ]);
       await client.query(`UPDATE catalog_versions SET is_active = FALSE WHERE tenant_id = $1`, [tenantId]);
       await client.query(
         `UPDATE catalog_versions

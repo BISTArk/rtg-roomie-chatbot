@@ -32,6 +32,7 @@ import { isComplaintMessage } from "@/lib/complaint-detection";
 import { getWelcomeMessage } from "@/lib/widget-config";
 import type { WidgetBranding } from "@/lib/widget-config";
 import { buildTenantCatalogContext, getActiveCatalogDataset, recordConversationAnalytics, resolveTenantFromToken } from "@/lib/tenant-platform";
+import { isPgDeadlockError } from "@/lib/db";
 import { chatTools } from "@/tools";
 
 export const maxDuration = 60;
@@ -413,12 +414,16 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     console.error("[chat route] tenant resolution failed:", error);
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : "Tenant resolution failed",
-      }),
-      { status: 401, headers: { "Content-Type": "application/json" } }
-    );
+    const message = error instanceof Error ? error.message : "Tenant resolution failed";
+    const isAuthError =
+      message.includes("Invalid tenant token") ||
+      message.includes("does not match the resolved tenant") ||
+      message.includes("not allowed for host");
+    const status = isAuthError ? 401 : isPgDeadlockError(error) ? 503 : 500;
+    return new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const openrouter = createOpenRouter({

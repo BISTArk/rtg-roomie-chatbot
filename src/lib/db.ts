@@ -36,15 +36,39 @@ export function getPool(): Pool {
   return pool;
 }
 
+export function isPgDeadlockError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "40P01"
+  );
+}
+
 export async function withDb<T>(
-  callback: (client: PoolClient) => Promise<T>
+  callback: (client: PoolClient) => Promise<T>,
+  options: { retries?: number } = {}
 ): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    return await callback(client);
-  } finally {
-    client.release();
+  const retries = options.retries ?? 3;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const client = await getPool().connect();
+    try {
+      return await callback(client);
+    } catch (error) {
+      lastError = error;
+      if (isPgDeadlockError(error) && attempt < retries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
+
+  throw lastError;
 }
 
 export async function queryDb<T extends QueryResultRow = QueryResultRow>(

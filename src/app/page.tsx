@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import Script from "next/script";
 import { ChatWidget } from "@/components/ChatWidget";
 import { MockContextPanel } from "@/components/MockContextPanel";
 import { ShopifyAuthRedirect } from "@/components/ShopifyAuthRedirect";
@@ -5,8 +7,7 @@ import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { getShopifyAppConfig, normalizeShopifyShopDomain } from "@/lib/shopify";
 import { ensureTenantShopifyCatalogSynced } from "@/lib/shopify-catalog-sync";
-import { getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
-import Script from "next/script";
+import { getActiveCatalogDataset, getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
 
 export default async function Home({
   searchParams,
@@ -32,10 +33,21 @@ export default async function Home({
     }
 
     const appConfig = getShopifyAppConfig();
-    const catalogSync = await ensureTenantShopifyCatalogSynced({
-      tenantId: tenant.tenantId,
-      appOrigin: appConfig.appUrl,
-    });
+    const existingCatalog = await getActiveCatalogDataset(tenant.tenantId);
+    const catalogSync = existingCatalog ? "ready" : "";
+
+    if (!existingCatalog) {
+      after(async () => {
+        try {
+          await ensureTenantShopifyCatalogSynced({
+            tenantId: tenant.tenantId,
+            appOrigin: appConfig.appUrl,
+          });
+        } catch (error) {
+          console.error("[shopify catalog] background ensure sync failed:", error);
+        }
+      });
+    }
     const adminAuthenticated = await isAdminAuthenticated();
     const tenantKey = adminAuthenticated ? tenant.tenantKey : "";
     const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
