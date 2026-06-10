@@ -7,6 +7,10 @@ export interface WidgetTheme {
   accent: string;
   accentHover: string;
   accentText: string;
+  bgPrimary: string;
+  bgPrimaryText: string;
+  bgSecondary: string;
+  bgSecondaryText: string;
   surface: string;
   surfaceAlt: string;
   text: string;
@@ -52,6 +56,10 @@ export const DEFAULT_WIDGET_THEME: WidgetTheme = {
   accent: "#1f1f1f",
   accentHover: "#343434",
   accentText: "#ffffff",
+  bgPrimary: "#1f1f1f",
+  bgPrimaryText: "#ffffff",
+  bgSecondary: "#ece9e2",
+  bgSecondaryText: "#1a1a1a",
   surface: "#ffffff",
   surfaceAlt: "#f6f6f4",
   text: "#1a1a1a",
@@ -89,6 +97,10 @@ export const SHOP_ASSIST_WIDGET_THEME: WidgetTheme = {
   accent: "#003DA5",
   accentHover: "#002D7A",
   accentText: "#ffffff",
+  bgPrimary: "#003DA5",
+  bgPrimaryText: "#ffffff",
+  bgSecondary: "#e8eff8",
+  bgSecondaryText: "#1a1a1a",
   surface: "#ffffff",
   surfaceAlt: "#f7f7f7",
   text: "#1a1a1a",
@@ -154,6 +166,22 @@ function sanitizeTheme(theme: unknown): Partial<WidgetTheme> {
     accent: pickString(record.accent, DEFAULT_WIDGET_THEME.accent),
     accentHover: pickString(record.accentHover, DEFAULT_WIDGET_THEME.accentHover),
     accentText: pickString(record.accentText, DEFAULT_WIDGET_THEME.accentText),
+    bgPrimary: pickString(
+      record.bgPrimary ?? record.primary,
+      pickString(record.accent, DEFAULT_WIDGET_THEME.bgPrimary)
+    ),
+    bgPrimaryText: pickString(
+      record.bgPrimaryText ?? record.primaryText,
+      pickString(record.accentText, DEFAULT_WIDGET_THEME.bgPrimaryText)
+    ),
+    bgSecondary: pickString(
+      record.bgSecondary ?? record.secondary,
+      pickString(record.userBubble, DEFAULT_WIDGET_THEME.bgSecondary)
+    ),
+    bgSecondaryText: pickString(
+      record.bgSecondaryText ?? record.secondaryText,
+      pickString(record.text, DEFAULT_WIDGET_THEME.bgSecondaryText)
+    ),
     surface: pickString(record.surface, DEFAULT_WIDGET_THEME.surface),
     surfaceAlt: pickString(record.surfaceAlt, DEFAULT_WIDGET_THEME.surfaceAlt),
     text: pickString(record.text, DEFAULT_WIDGET_THEME.text),
@@ -254,10 +282,19 @@ export function getWelcomeMessage(branding: WidgetBranding): string {
 }
 
 export function buildWidgetThemeStyle(theme: WidgetTheme): CSSProperties {
+  const primary = theme.bgPrimary || theme.accent;
+  const primaryText = theme.bgPrimaryText || theme.accentText;
+  const secondary = theme.bgSecondary || theme.userBubble || theme.surfaceAlt;
+  const secondaryText = theme.bgSecondaryText || theme.text;
+
   return {
     "--widget-accent": theme.accent,
     "--widget-accent-hover": theme.accentHover,
     "--widget-accent-text": theme.accentText,
+    "--widget-primary": primary,
+    "--widget-primary-text": primaryText,
+    "--widget-secondary": secondary,
+    "--widget-secondary-text": secondaryText,
     "--widget-surface": theme.surface,
     "--widget-surface-alt": theme.surfaceAlt,
     "--widget-text": theme.text,
@@ -272,6 +309,19 @@ export function buildWidgetThemeStyle(theme: WidgetTheme): CSSProperties {
     "--widget-font-family": theme.fontFamily,
     "--widget-radius": theme.radius,
     "--widget-shadow": theme.shadow,
+    "--primary": primary,
+    "--primary-foreground": primaryText,
+    "--secondary": secondary,
+    "--secondary-foreground": secondaryText,
+    "--accent": theme.surfaceAlt,
+    "--accent-foreground": theme.text,
+    "--background": theme.surface,
+    "--foreground": theme.text,
+    "--card": theme.surface,
+    "--card-foreground": theme.text,
+    "--muted": theme.surfaceAlt,
+    "--muted-foreground": theme.textMuted,
+    "--border": theme.border,
     color: theme.text,
     fontFamily: theme.fontFamily,
   } as CSSProperties;

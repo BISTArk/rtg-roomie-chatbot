@@ -117,6 +117,10 @@
     if (script.dataset.accent) theme.accent = script.dataset.accent;
     if (script.dataset.accentHover) theme.accentHover = script.dataset.accentHover;
     if (script.dataset.accentText) theme.accentText = script.dataset.accentText;
+    if (script.dataset.bgPrimary) theme.bgPrimary = script.dataset.bgPrimary;
+    if (script.dataset.bgPrimaryText) theme.bgPrimaryText = script.dataset.bgPrimaryText;
+    if (script.dataset.bgSecondary) theme.bgSecondary = script.dataset.bgSecondary;
+    if (script.dataset.bgSecondaryText) theme.bgSecondaryText = script.dataset.bgSecondaryText;
     if (script.dataset.surface) theme.surface = script.dataset.surface;
     if (script.dataset.surfaceAlt) theme.surfaceAlt = script.dataset.surfaceAlt;
     if (script.dataset.text) theme.text = script.dataset.text;

@@ -57,6 +57,10 @@ export async function GET(request: NextRequest) {
     theme: {
       accent: clean(request.nextUrl.searchParams.get("accent")) || undefined,
       accentText: clean(request.nextUrl.searchParams.get("accentText")) || undefined,
+      bgPrimary: clean(request.nextUrl.searchParams.get("bgPrimary")) || undefined,
+      bgPrimaryText: clean(request.nextUrl.searchParams.get("bgPrimaryText")) || undefined,
+      bgSecondary: clean(request.nextUrl.searchParams.get("bgSecondary")) || undefined,
+      bgSecondaryText: clean(request.nextUrl.searchParams.get("bgSecondaryText")) || undefined,
     },
     branding: {
       launcherLabel: clean(request.nextUrl.searchParams.get("launcherLabel")) || undefined,

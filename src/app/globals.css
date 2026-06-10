@@ -8,6 +8,10 @@
   --widget-accent: #1f1f1f;
   --widget-accent-hover: #343434;
   --widget-accent-text: #ffffff;
+  --widget-primary: #1f1f1f;
+  --widget-primary-text: #ffffff;
+  --widget-secondary: #ece9e2;
+  --widget-secondary-text: #1a1a1a;
   --widget-surface: #ffffff;
   --widget-surface-alt: #f6f6f4;
   --widget-text: #1a1a1a;
