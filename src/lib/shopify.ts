@@ -36,6 +36,43 @@ export interface ShopifyShopDetails {
   currencyCode?: string;
 }
 
+export class ShopifyAdminAccessError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ShopifyAdminAccessError";
+    this.status = status;
+  }
+}
+
+export function isShopifyAdminAccessError(error: unknown): error is ShopifyAdminAccessError {
+  return error instanceof ShopifyAdminAccessError;
+}
+
+async function readShopifyErrorBody(response: Response): Promise<string> {
+  try {
+    const text = await response.text();
+    return text.trim().slice(0, 300);
+  } catch {
+    return "";
+  }
+}
+
+function buildShopifyAccessError(status: number, detail: string): ShopifyAdminAccessError {
+  const suffix = detail ? ` ${detail}` : "";
+  if (status === 401 || status === 403) {
+    return new ShopifyAdminAccessError(
+      `Shopify API access was denied (HTTP ${status}). The stored access token is missing, invalid, or was issued by a different app. Re-install the app to refresh API access.${suffix}`,
+      status
+    );
+  }
+  return new ShopifyAdminAccessError(
+    `Shopify API request failed (HTTP ${status}).${suffix}`,
+    status
+  );
+}
+
 interface ShopifyGraphQlResponse<T> {
   data?: T;
   errors?: Array<{ message?: string }>;
@@ -143,11 +180,17 @@ async function runShopifyGraphQl<T>(input: {
     );
 
     if (!response.ok) {
+      const detail = await readShopifyErrorBody(response);
+      if (response.status === 401 || response.status === 403) {
+        throw buildShopifyAccessError(response.status, detail);
+      }
       if ((response.status === 400 || response.status === 404) && apiVersion !== versionsToTry[versionsToTry.length - 1]) {
         lastError = new Error(`Shopify GraphQL request failed with status ${response.status} using API version ${apiVersion}.`);
         continue;
       }
-      throw new Error(`Shopify GraphQL request failed with status ${response.status}.`);
+      throw new Error(
+        `Shopify GraphQL request failed with status ${response.status}.${detail ? ` ${detail}` : ""}`
+      );
     }
 
     const body = (await response.json()) as ShopifyGraphQlResponse<T>;
@@ -235,7 +278,6 @@ export async function buildCatalogDatasetFromShopify(input: {
                       price
                       compareAtPrice
                       availableForSale
-                      inventoryQuantity
                     }
                   }
                 }
@@ -274,8 +316,7 @@ export async function buildCatalogDatasetFromShopify(input: {
           "Sale Price": variant.price || "",
           "Regular Price": variant.compareAtPrice || variant.price || "",
           Availability: variant.availableForSale ? "In stock" : "Out of stock",
-          "Inventory Quantity":
-            typeof variant.inventoryQuantity === "number" ? String(variant.inventoryQuantity) : "",
+          "Inventory Quantity": "",
           SKU: variant.sku || "",
           "Image 1": normalizeShopifyProductImageUrl(product.featuredImage?.url),
           "Product Link": productUrl,
@@ -316,6 +357,10 @@ export function getShopifyAppConfig(requestOrigin?: string): ShopifyAppConfig {
     scopes: DEFAULT_SCOPES,
     apiVersion: DEFAULT_API_VERSION,
   };
+}
+
+export function buildShopifyResyncCatalogUrl(appUrl: string, shop: string): string {
+  return `${appUrl.replace(/\/+$/, "")}/shopify/installed?shop=${encodeURIComponent(shop)}&resync=1`;
 }
 
 export function normalizeShopifyShopDomain(input: string | null | undefined): string {
@@ -436,6 +481,26 @@ export async function exchangeShopifyCodeForAccessToken(input: {
   };
 }
 
+export async function assertShopifyAdminAccess(input: {
+  shop: string;
+  accessToken: string;
+  config: ShopifyAppConfig;
+}): Promise<void> {
+  const token = String(input.accessToken || "").trim();
+  if (!token) {
+    throw new ShopifyAdminAccessError(
+      "Missing Shopify access token. Re-install the app to refresh API access.",
+      403
+    );
+  }
+
+  await fetchShopifyShopDetails({
+    shop: input.shop,
+    accessToken: token,
+    config: input.config,
+  });
+}
+
 export async function fetchShopifyShopDetails(input: {
   shop: string;
   accessToken: string;
@@ -457,11 +522,17 @@ export async function fetchShopifyShopDetails(input: {
     );
 
     if (!response.ok) {
+      const detail = await readShopifyErrorBody(response);
+      if (response.status === 401 || response.status === 403) {
+        throw buildShopifyAccessError(response.status, detail);
+      }
       if ((response.status === 400 || response.status === 404) && apiVersion !== versionsToTry[versionsToTry.length - 1]) {
         lastError = new Error(`Could not load Shopify shop details with API version ${apiVersion} (status ${response.status}).`);
         continue;
       }
-      throw new Error(`Could not load Shopify shop details (status ${response.status}).`);
+      throw new Error(
+        `Could not load Shopify shop details (status ${response.status}).${detail ? ` ${detail}` : ""}`
+      );
     }
 
     const data = (await response.json()) as {

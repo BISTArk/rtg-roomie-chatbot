@@ -7,7 +7,7 @@ import {
   verifyShopifyCallbackHmac,
   verifyShopifyInstallState,
 } from "@/lib/shopify";
-import { syncTenantShopifyCatalog } from "@/lib/shopify-catalog-sync";
+import { syncTenantShopifyCatalog, formatCatalogSyncError } from "@/lib/shopify-catalog-sync";
 import { upsertTenantFromShopifyInstall } from "@/lib/tenant-platform";
 
 const SHOPIFY_INSTALL_COOKIE = "shop_assist_shopify_install_state";
@@ -89,6 +89,7 @@ export async function GET(request: NextRequest) {
     });
 
     let catalogSync = "ready";
+    let catalogSyncError = "";
     try {
       await syncTenantShopifyCatalog({
         tenantId: tenant.tenantId,
@@ -97,14 +98,17 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error("[shopify callback] initial catalog sync failed:", error);
       catalogSync = "failed";
+      catalogSyncError = formatCatalogSyncError(error);
     }
 
-    const response = NextResponse.redirect(
-      new URL(
-        `/shopify/installed?shop=${encodeURIComponent(shop)}&catalogSync=${encodeURIComponent(catalogSync)}`,
-        request.nextUrl.origin
-      )
-    );
+    const installedUrl = new URL("/shopify/installed", request.nextUrl.origin);
+    installedUrl.searchParams.set("shop", shop);
+    installedUrl.searchParams.set("catalogSync", catalogSync);
+    if (catalogSyncError) {
+      installedUrl.searchParams.set("catalogSyncError", catalogSyncError);
+    }
+
+    const response = NextResponse.redirect(installedUrl);
     response.cookies.delete(SHOPIFY_INSTALL_COOKIE);
     return response;
   } catch (error) {

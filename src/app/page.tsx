@@ -5,7 +5,7 @@ import { MockContextPanel } from "@/components/MockContextPanel";
 import { ShopifyAuthRedirect } from "@/components/ShopifyAuthRedirect";
 import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
-import { getShopifyAppConfig, normalizeShopifyShopDomain } from "@/lib/shopify";
+import { getShopifyAppConfig, normalizeShopifyShopDomain, buildShopifyResyncCatalogUrl } from "@/lib/shopify";
 import { ensureTenantShopifyCatalogSynced } from "@/lib/shopify-catalog-sync";
 import { getActiveCatalogDataset, getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
 
@@ -55,14 +55,18 @@ export default async function Home({
       shopifyApiKey
         ? `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${encodeURIComponent(shopifyApiKey)}/shop-assist`
         : "";
+    const reinstallUrl = `${appConfig.appUrl}/api/shopify/install?shop=${encodeURIComponent(shop)}`;
+    const resyncCatalogUrl = buildShopifyResyncCatalogUrl(appConfig.appUrl, shop);
 
     return (
       <ShopifyInstalledView
         shop={shop}
-        catalogSync={catalogSync}
+        catalogSync={catalogSync || (existingCatalog ? "ready" : "pending")}
         adminAuthenticated={adminAuthenticated}
         tenantKey={tenantKey}
         enableEmbedUrl={enableEmbedUrl}
+        reinstallUrl={reinstallUrl}
+        resyncCatalogUrl={resyncCatalogUrl}
       />
     );
   }

@@ -3,15 +3,21 @@ import Link from "next/link";
 export function ShopifyInstalledView({
   shop,
   catalogSync,
+  catalogSyncError,
   adminAuthenticated,
   tenantKey,
   enableEmbedUrl,
+  reinstallUrl,
+  resyncCatalogUrl,
 }: {
   shop: string;
   catalogSync?: string;
+  catalogSyncError?: string;
   adminAuthenticated: boolean;
   tenantKey?: string;
   enableEmbedUrl: string;
+  reinstallUrl?: string;
+  resyncCatalogUrl?: string;
 }) {
   return (
     <main className="min-h-screen px-6 py-10" style={{ background: "var(--widget-surface-alt)" }}>
@@ -31,8 +37,26 @@ export function ShopifyInstalledView({
           </p>
         ) : null}
         {catalogSync === "failed" ? (
-          <p className="mt-3 text-sm" style={{ color: "#b45309" }}>
-            The app installed successfully, but setup is still finishing in the background. If the widget does not appear after enabling it, contact support.
+          <div className="mt-3 space-y-2 text-sm" style={{ color: "#b45309" }}>
+            <p>
+              Product catalog sync failed. This usually means the Shopify access token is missing,
+              invalid, or was created before the app credentials were corrected.
+            </p>
+            {catalogSyncError ? (
+              <p className="rounded-xl border px-3 py-2 font-mono text-xs" style={{ borderColor: "#f59e0b", color: "#92400e" }}>
+                {catalogSyncError}
+              </p>
+            ) : null}
+            {reinstallUrl ? (
+              <p>
+                Reconnect the app to refresh API access, then retry catalog sync.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {catalogSync === "pending" ? (
+          <p className="mt-3 text-sm" style={{ color: "var(--widget-text-muted)" }}>
+            Connecting your product catalog in the background...
           </p>
         ) : null}
         {enableEmbedUrl ? (
@@ -44,6 +68,28 @@ export function ShopifyInstalledView({
           <div>Shop: {shop}</div>
         </div>
         <div className="mt-6 flex flex-wrap gap-3">
+          {reinstallUrl ? (
+            <a
+              href={reinstallUrl}
+              target="_top"
+              rel="noreferrer"
+              className="rounded-2xl border px-4 py-3 text-sm font-semibold"
+              style={{ borderColor: "var(--widget-border)", color: "var(--widget-text)" }}
+            >
+              Reconnect Shopify
+            </a>
+          ) : null}
+          {resyncCatalogUrl && catalogSync !== "ready" ? (
+            <a
+              href={resyncCatalogUrl}
+              target="_top"
+              rel="noreferrer"
+              className="rounded-2xl px-4 py-3 text-sm font-semibold"
+              style={{ background: "var(--widget-accent)", color: "var(--widget-accent-text)" }}
+            >
+              Sync product catalog
+            </a>
+          ) : null}
           {enableEmbedUrl ? (
             <a
               href={enableEmbedUrl}

@@ -1,4 +1,9 @@
-import { buildCatalogDatasetFromShopify, getShopifyAppConfig } from "@/lib/shopify";
+import {
+  assertShopifyAdminAccess,
+  buildCatalogDatasetFromShopify,
+  getShopifyAppConfig,
+  isShopifyAdminAccessError,
+} from "@/lib/shopify";
 import {
   createCatalogVersion,
   getActiveCatalogDataset,
@@ -8,6 +13,13 @@ import {
 } from "@/lib/tenant-platform";
 
 export type CatalogSyncStatus = "ready" | "failed";
+
+export function formatCatalogSyncError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message.trim().slice(0, 240);
+  }
+  return "Unknown catalog sync error.";
+}
 
 export async function syncTenantShopifyCatalog(input: {
   tenantId: string;
@@ -26,11 +38,18 @@ export async function syncTenantShopifyCatalog(input: {
     throw new Error("Shopify installation not found for this tenant.");
   }
 
+  const config = getShopifyAppConfig(input.appOrigin);
+  await assertShopifyAdminAccess({
+    shop: installation.shopDomain,
+    accessToken: installation.accessToken,
+    config,
+  });
+
   const dataset = await buildCatalogDatasetFromShopify({
     shop: installation.shopDomain,
     storefrontDomain: installation.storefrontDomain,
     accessToken: installation.accessToken,
-    config: getShopifyAppConfig(input.appOrigin),
+    config,
   });
 
   await createCatalogVersion({
@@ -63,7 +82,11 @@ export async function ensureTenantShopifyCatalogSynced(input: {
     await syncTenantShopifyCatalog(input);
     return "ready";
   } catch (error) {
-    console.error("[shopify catalog] ensure sync failed:", error);
+    if (isShopifyAdminAccessError(error)) {
+      console.error("[shopify catalog] ensure sync failed:", error.message);
+    } else {
+      console.error("[shopify catalog] ensure sync failed:", error);
+    }
     return "failed";
   }
 }
