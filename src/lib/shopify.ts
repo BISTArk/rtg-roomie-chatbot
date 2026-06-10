@@ -467,9 +467,18 @@ function parseShopifyOAuthTokenResponse(data: Record<string, unknown>): ShopifyA
     throw new Error("Shopify token response did not include an access token.");
   }
 
-  const expiresIn = typeof data.expires_in === "number" ? data.expires_in : undefined;
+  const expiresIn =
+    typeof data.expires_in === "number"
+      ? data.expires_in
+      : typeof data.expires_in === "string" && data.expires_in.trim()
+        ? Number(data.expires_in)
+        : undefined;
   const refreshTokenExpiresIn =
-    typeof data.refresh_token_expires_in === "number" ? data.refresh_token_expires_in : undefined;
+    typeof data.refresh_token_expires_in === "number"
+      ? data.refresh_token_expires_in
+      : typeof data.refresh_token_expires_in === "string" && data.refresh_token_expires_in.trim()
+        ? Number(data.refresh_token_expires_in)
+        : undefined;
   const refreshToken =
     typeof data.refresh_token === "string" && data.refresh_token.trim()
       ? data.refresh_token.trim()
@@ -514,17 +523,33 @@ async function postShopifyOAuthTokenRequest(
   return parseShopifyOAuthTokenResponse(data);
 }
 
+function assertExpiringShopifyTokenResponse(
+  token: ShopifyAccessTokenResponse,
+  context: string
+): ShopifyAccessTokenResponse {
+  if (!token.refreshToken || !token.expiresIn) {
+    throw new Error(
+      `Shopify ${context} did not return an expiring offline token (missing refresh_token or expires_in). Re-install the app to refresh API access.`
+    );
+  }
+  return token;
+}
+
 export async function exchangeShopifyCodeForAccessToken(input: {
   shop: string;
   code: string;
   config: ShopifyAppConfig;
 }): Promise<ShopifyAccessTokenResponse> {
-  return postShopifyOAuthTokenRequest(input.shop, {
-    client_id: input.config.apiKey,
-    client_secret: input.config.apiSecret,
-    code: input.code,
-    expiring: 1,
-  });
+  const token = assertExpiringShopifyTokenResponse(
+    await postShopifyOAuthTokenRequest(input.shop, {
+      client_id: input.config.apiKey,
+      client_secret: input.config.apiSecret,
+      code: input.code,
+      expiring: 1,
+    }),
+    "OAuth token exchange"
+  );
+  return token;
 }
 
 export async function refreshShopifyAccessToken(input: {
@@ -532,12 +557,15 @@ export async function refreshShopifyAccessToken(input: {
   refreshToken: string;
   config: ShopifyAppConfig;
 }): Promise<ShopifyAccessTokenResponse> {
-  return postShopifyOAuthTokenRequest(input.shop, {
-    client_id: input.config.apiKey,
-    client_secret: input.config.apiSecret,
-    grant_type: "refresh_token",
-    refresh_token: input.refreshToken,
-  });
+  return assertExpiringShopifyTokenResponse(
+    await postShopifyOAuthTokenRequest(input.shop, {
+      client_id: input.config.apiKey,
+      client_secret: input.config.apiSecret,
+      grant_type: "refresh_token",
+      refresh_token: input.refreshToken,
+    }),
+    "token refresh"
+  );
 }
 
 export async function migrateShopifyOfflineTokenToExpiring(input: {
@@ -545,15 +573,29 @@ export async function migrateShopifyOfflineTokenToExpiring(input: {
   accessToken: string;
   config: ShopifyAppConfig;
 }): Promise<ShopifyAccessTokenResponse> {
-  return postShopifyOAuthTokenRequest(input.shop, {
-    client_id: input.config.apiKey,
-    client_secret: input.config.apiSecret,
-    grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-    subject_token: input.accessToken,
-    subject_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
-    requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
-    expiring: 1,
-  });
+  try {
+    return assertExpiringShopifyTokenResponse(
+      await postShopifyOAuthTokenRequest(input.shop, {
+        client_id: input.config.apiKey,
+        client_secret: input.config.apiSecret,
+        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+        subject_token: input.accessToken,
+        subject_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
+        requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
+        expiring: 1,
+      }),
+      "offline token migration"
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("invalid_subject_token")) {
+      throw new ShopifyAdminAccessError(
+        "Shopify offline token migration failed because the stored access token is no longer valid. Re-install the app to refresh API access.",
+        403
+      );
+    }
+    throw error;
+  }
 }
 
 export async function resolveExpiringShopifyAccessToken(input: {

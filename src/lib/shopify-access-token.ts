@@ -26,7 +26,7 @@ export async function getShopifyAccessTokenForInstallation(input: {
       refreshToken: resolved.refreshToken ?? null,
       accessTokenExpiresAt: resolved.accessTokenExpiresAt ?? null,
       refreshTokenExpiresAt: resolved.refreshTokenExpiresAt ?? null,
-      scopes: resolved.scopes.length ? resolved.scopes : undefined,
+      scopes: resolved.scopes.length ? resolved.scopes : input.installation.scopes,
     });
   }
 
