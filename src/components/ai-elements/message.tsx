@@ -53,12 +53,12 @@ const messageContentVariants = cva(
       variant: {
         flat: cn(
           "w-fit",
-          "group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+          "group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-[var(--widget-secondary)] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-[var(--widget-secondary-text)]",
           "group-[.is-assistant]:w-full group-[.is-assistant]:text-foreground"
         ),
         contained: cn(
-          "group-[.is-user]:ml-auto group-[.is-user]:w-fit group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm group-[.is-user]:bg-primary group-[.is-user]:px-4 group-[.is-user]:py-2.5 group-[.is-user]:leading-relaxed group-[.is-user]:text-primary-foreground",
-          "group-[.is-assistant]:w-full group-[.is-assistant]:rounded-2xl group-[.is-assistant]:border group-[.is-assistant]:border-border group-[.is-assistant]:bg-card group-[.is-assistant]:p-2.5 group-[.is-assistant]:text-card-foreground group-[.is-assistant]:shadow-sm"
+          "group-[.is-user]:ml-auto group-[.is-user]:w-fit group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm group-[.is-user]:bg-[var(--widget-primary)] group-[.is-user]:px-4 group-[.is-user]:py-2.5 group-[.is-user]:leading-relaxed group-[.is-user]:text-[var(--widget-primary-text)]",
+          "group-[.is-assistant]:w-full group-[.is-assistant]:rounded-2xl group-[.is-assistant]:border group-[.is-assistant]:border-[var(--widget-border)] group-[.is-assistant]:bg-[var(--widget-surface)] group-[.is-assistant]:p-2.5 group-[.is-assistant]:text-[var(--widget-text)] group-[.is-assistant]:shadow-sm"
         ),
       },
     },

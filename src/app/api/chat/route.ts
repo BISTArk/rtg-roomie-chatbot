@@ -59,12 +59,13 @@ type ChatRequestBody = {
 };
 
 const MODEL_MAP: Record<string, string> = {
+  "gpt-5.4-mini": "openai/gpt-5.4-mini",
   "gemini-flash-3": "google/gemini-3-flash-preview",
   "claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
   "gpt-5.4": "openai/gpt-5.4",
 };
 
-const DEFAULT_MODEL = "gemini-flash-3";
+const DEFAULT_MODEL = "gpt-5.4-mini";
 const NO_ACTIVE_TENANT_CATALOG_MARKER = "(no active tenant catalog snapshot)";
 
 function getTextFromUiMessage(m: UIMessage): string {
@@ -432,7 +433,12 @@ export async function POST(request: Request) {
     appUrl: tenant.appUrl,
   });
   console.log("[chat route] openrouter client created");
-  const chatModel = openrouter.chat(modelId);
+  const chatModel = openrouter.chat(modelId, {
+    reasoning: {
+      effort: "medium",
+      exclude: true,
+    },
+  });
   console.log("[chat route] tenant:", tenant.tenantKey, tenant.tenantId);
 
   try {

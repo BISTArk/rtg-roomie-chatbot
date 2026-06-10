@@ -405,8 +405,8 @@ function AskUserQuestionTool({
                                   className={cn(
                                     "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]",
                                     isSelected
-                                      ? "border-primary bg-primary text-primary-foreground"
-                                      : "border-border bg-background text-transparent"
+                                      ? "border-[var(--widget-primary)] bg-[var(--widget-primary)] text-[var(--widget-primary-text)]"
+                                      : "border-[var(--widget-border)] bg-[var(--widget-surface)] text-transparent"
                                   )}
                                 >
                                   <Check size={10} strokeWidth={3} />

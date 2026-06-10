@@ -283,7 +283,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [loaded, setLoaded] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string>("");
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
-  const selectedModel = "gemini-flash-3";
+  const selectedModel = "gpt-5.4-mini";
   const initialTenantKey = getRuntimeTenantKey();
   const [widgetConfig, setWidgetConfig] = useState(() =>
     resolveWidgetConfig(getWindowChatConfig())
@@ -316,6 +316,15 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     () => buildWidgetThemeStyle(widgetConfig.theme),
     [widgetConfig.theme]
   );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    for (const [key, value] of Object.entries(widgetThemeStyle)) {
+      if (key.startsWith("--") && typeof value === "string") {
+        root.style.setProperty(key, value);
+      }
+    }
+  }, [widgetThemeStyle]);
   const isLeftPlacement = widgetConfig.placement === "bottom-left";
   const launcherPositionClass = isLeftPlacement
     ? "left-2 sm:left-4"
@@ -1909,6 +1918,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                 : `bottom-0 h-[min(860px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[100vw] rounded-t-[28px] sm:bottom-6 sm:h-[800px] sm:w-[640px] sm:rounded-2xl lg:w-[720px] ${panelPositionClass}`
             } ${embed ? "pointer-events-auto" : ""}`}
             style={{
+              ...widgetThemeStyle,
               border: "1px solid var(--widget-border)",
               backgroundColor: "var(--widget-surface)",
               boxShadow: "var(--widget-shadow)",
