@@ -107,6 +107,9 @@ interface ShopifyInstallationRow {
   shop_domain: string;
   storefront_domain: string | null;
   access_token: string;
+  access_token_expires_at: string | null;
+  refresh_token: string | null;
+  refresh_token_expires_at: string | null;
   scopes_json: string[];
   status: ShopifyInstallStatus;
   shop_name: string | null;
@@ -303,6 +306,9 @@ function mapShopifyInstallationRow(row: ShopifyInstallationRow): ShopifyInstalla
     shopDomain: row.shop_domain,
     storefrontDomain: row.storefront_domain,
     accessToken: row.access_token,
+    refreshToken: row.refresh_token,
+    accessTokenExpiresAt: row.access_token_expires_at,
+    refreshTokenExpiresAt: row.refresh_token_expires_at,
     scopes: Array.isArray(row.scopes_json) ? row.scopes_json : [],
     status: row.status,
     shopName: row.shop_name,
@@ -1621,6 +1627,9 @@ export async function upsertTenantFromShopifyInstall(input: {
   storefrontDomain?: string | null;
   additionalDomains?: string[];
   accessToken: string;
+  refreshToken?: string | null;
+  accessTokenExpiresAt?: string | null;
+  refreshTokenExpiresAt?: string | null;
   scopes: string[];
   shopName: string;
   shopOwner?: string | null;
@@ -1743,13 +1752,16 @@ export async function upsertTenantFromShopifyInstall(input: {
 
       await client.query(
         `INSERT INTO shopify_installations (
-          id, tenant_id, shop_domain, storefront_domain, access_token, scopes_json, status, shop_name, shop_owner, email, currency_code, uninstalled_at
-        ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,'installed',$7,$8,$9,$10,NULL)
+          id, tenant_id, shop_domain, storefront_domain, access_token, access_token_expires_at, refresh_token, refresh_token_expires_at, scopes_json, status, shop_name, shop_owner, email, currency_code, uninstalled_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,'installed',$10,$11,$12,$13,NULL)
         ON CONFLICT (shop_domain)
         DO UPDATE SET
           tenant_id = EXCLUDED.tenant_id,
           storefront_domain = EXCLUDED.storefront_domain,
           access_token = EXCLUDED.access_token,
+          access_token_expires_at = EXCLUDED.access_token_expires_at,
+          refresh_token = EXCLUDED.refresh_token,
+          refresh_token_expires_at = EXCLUDED.refresh_token_expires_at,
           scopes_json = EXCLUDED.scopes_json,
           status = 'installed',
           shop_name = EXCLUDED.shop_name,
@@ -1764,6 +1776,9 @@ export async function upsertTenantFromShopifyInstall(input: {
           normalizedShopDomain,
           normalizedStorefrontDomain,
           input.accessToken,
+          input.accessTokenExpiresAt ?? null,
+          input.refreshToken ?? null,
+          input.refreshTokenExpiresAt ?? null,
           JSON.stringify(input.scopes),
           input.shopName.trim() || null,
           input.shopOwner || null,
@@ -1918,6 +1933,41 @@ export async function getTenantShopifyInstallation(
   if (!hasDatabase()) return null;
   await ensurePlatformSchema();
   return withDb(async (client) => loadShopifyInstallation(client, tenantId));
+}
+
+export async function updateShopifyInstallationTokens(input: {
+  tenantId: string;
+  accessToken: string;
+  refreshToken?: string | null;
+  accessTokenExpiresAt?: string | null;
+  refreshTokenExpiresAt?: string | null;
+  scopes?: string[];
+}): Promise<void> {
+  if (!hasDatabase()) {
+    throw new Error("DATABASE_URL is required to update Shopify installation tokens.");
+  }
+
+  await ensurePlatformSchema();
+  await withDb(async (client) => {
+    await client.query(
+      `UPDATE shopify_installations
+       SET access_token = $2,
+           access_token_expires_at = $3,
+           refresh_token = $4,
+           refresh_token_expires_at = $5,
+           scopes_json = COALESCE($6::jsonb, scopes_json),
+           updated_at = NOW()
+       WHERE tenant_id = $1`,
+      [
+        input.tenantId,
+        input.accessToken,
+        input.accessTokenExpiresAt ?? null,
+        input.refreshToken ?? null,
+        input.refreshTokenExpiresAt ?? null,
+        input.scopes ? JSON.stringify(input.scopes) : null,
+      ]
+    );
+  });
 }
 
 export async function getTenantByShopifyShopDomain(

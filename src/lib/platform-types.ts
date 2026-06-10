@@ -28,6 +28,9 @@ export interface ShopifyInstallationRecord {
   shopDomain: string;
   storefrontDomain?: string | null;
   accessToken: string;
+  refreshToken?: string | null;
+  accessTokenExpiresAt?: string | null;
+  refreshTokenExpiresAt?: string | null;
   scopes: string[];
   status: ShopifyInstallStatus;
   shopName?: string | null;

@@ -24,7 +24,18 @@ export interface ShopifyInstallState {
 export interface ShopifyAccessTokenResponse {
   accessToken: string;
   scopes: string[];
+  expiresIn?: number;
+  refreshToken?: string;
+  refreshTokenExpiresIn?: number;
+  accessTokenExpiresAt?: string | null;
+  refreshTokenExpiresAt?: string | null;
 }
+
+export interface ShopifyResolvedAccessToken extends ShopifyAccessTokenResponse {
+  updated: boolean;
+}
+
+const SHOPIFY_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 export interface ShopifyShopDetails {
   id: number;
@@ -446,39 +457,155 @@ export function verifyShopifyCallbackHmac(
   return compareSignature(receivedHmac, digest);
 }
 
+function addSecondsIso(seconds: number): string {
+  return new Date(Date.now() + seconds * 1000).toISOString();
+}
+
+function parseShopifyOAuthTokenResponse(data: Record<string, unknown>): ShopifyAccessTokenResponse {
+  const accessToken = String(data.access_token || "").trim();
+  if (!accessToken) {
+    throw new Error("Shopify token response did not include an access token.");
+  }
+
+  const expiresIn = typeof data.expires_in === "number" ? data.expires_in : undefined;
+  const refreshTokenExpiresIn =
+    typeof data.refresh_token_expires_in === "number" ? data.refresh_token_expires_in : undefined;
+  const refreshToken =
+    typeof data.refresh_token === "string" && data.refresh_token.trim()
+      ? data.refresh_token.trim()
+      : undefined;
+
+  return {
+    accessToken,
+    scopes: String(data.scope || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+    expiresIn,
+    refreshToken,
+    refreshTokenExpiresIn,
+    accessTokenExpiresAt: expiresIn ? addSecondsIso(expiresIn) : null,
+    refreshTokenExpiresAt: refreshTokenExpiresIn ? addSecondsIso(refreshTokenExpiresIn) : null,
+  };
+}
+
+async function postShopifyOAuthTokenRequest(
+  shop: string,
+  body: Record<string, string | number>
+): Promise<ShopifyAccessTokenResponse> {
+  const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const detail = await readShopifyErrorBody(response);
+    throw new Error(
+      `Shopify token request failed with status ${response.status}.${detail ? ` ${detail}` : ""}`
+    );
+  }
+
+  const data = (await response.json()) as Record<string, unknown>;
+  return parseShopifyOAuthTokenResponse(data);
+}
+
 export async function exchangeShopifyCodeForAccessToken(input: {
   shop: string;
   code: string;
   config: ShopifyAppConfig;
 }): Promise<ShopifyAccessTokenResponse> {
-  const response = await fetch(`https://${input.shop}/admin/oauth/access_token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      client_id: input.config.apiKey,
-      client_secret: input.config.apiSecret,
-      code: input.code,
-    }),
+  return postShopifyOAuthTokenRequest(input.shop, {
+    client_id: input.config.apiKey,
+    client_secret: input.config.apiSecret,
+    code: input.code,
+    expiring: 1,
   });
+}
 
-  if (!response.ok) {
-    throw new Error(`Shopify token exchange failed with status ${response.status}.`);
+export async function refreshShopifyAccessToken(input: {
+  shop: string;
+  refreshToken: string;
+  config: ShopifyAppConfig;
+}): Promise<ShopifyAccessTokenResponse> {
+  return postShopifyOAuthTokenRequest(input.shop, {
+    client_id: input.config.apiKey,
+    client_secret: input.config.apiSecret,
+    grant_type: "refresh_token",
+    refresh_token: input.refreshToken,
+  });
+}
+
+export async function migrateShopifyOfflineTokenToExpiring(input: {
+  shop: string;
+  accessToken: string;
+  config: ShopifyAppConfig;
+}): Promise<ShopifyAccessTokenResponse> {
+  return postShopifyOAuthTokenRequest(input.shop, {
+    client_id: input.config.apiKey,
+    client_secret: input.config.apiSecret,
+    grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+    subject_token: input.accessToken,
+    subject_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
+    requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
+    expiring: 1,
+  });
+}
+
+export async function resolveExpiringShopifyAccessToken(input: {
+  shop: string;
+  accessToken: string;
+  refreshToken?: string | null;
+  accessTokenExpiresAt?: string | null;
+  refreshTokenExpiresAt?: string | null;
+  config: ShopifyAppConfig;
+}): Promise<ShopifyResolvedAccessToken> {
+  const now = Date.now();
+  const refreshToken = String(input.refreshToken || "").trim();
+
+  if (refreshToken) {
+    const accessExpiresAt = input.accessTokenExpiresAt
+      ? new Date(input.accessTokenExpiresAt).getTime()
+      : 0;
+    if (!accessExpiresAt || accessExpiresAt - now > SHOPIFY_TOKEN_REFRESH_BUFFER_MS) {
+      return {
+        accessToken: input.accessToken,
+        scopes: [],
+        refreshToken,
+        accessTokenExpiresAt: input.accessTokenExpiresAt ?? null,
+        refreshTokenExpiresAt: input.refreshTokenExpiresAt ?? null,
+        updated: false,
+      };
+    }
+
+    const refreshExpiresAt = input.refreshTokenExpiresAt
+      ? new Date(input.refreshTokenExpiresAt).getTime()
+      : Number.POSITIVE_INFINITY;
+    if (refreshExpiresAt <= now) {
+      throw new ShopifyAdminAccessError(
+        "Shopify refresh token expired. Open the app from Shopify admin to sign in again.",
+        403
+      );
+    }
+
+    const refreshed = await refreshShopifyAccessToken({
+      shop: input.shop,
+      refreshToken,
+      config: input.config,
+    });
+    return { ...refreshed, updated: true };
   }
 
-  const data = (await response.json()) as { access_token?: string; scope?: string };
-  if (!data.access_token) {
-    throw new Error("Shopify token exchange did not return an access token.");
-  }
-
-  return {
-    accessToken: data.access_token,
-    scopes: (data.scope || "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
-  };
+  const migrated = await migrateShopifyOfflineTokenToExpiring({
+    shop: input.shop,
+    accessToken: input.accessToken,
+    config: input.config,
+  });
+  return { ...migrated, updated: true };
 }
 
 export async function assertShopifyAdminAccess(input: {

@@ -4,6 +4,7 @@ import {
   getShopifyAppConfig,
   isShopifyAdminAccessError,
 } from "@/lib/shopify";
+import { getShopifyAccessTokenForInstallation } from "@/lib/shopify-access-token";
 import {
   createCatalogVersion,
   getActiveCatalogDataset,
@@ -39,16 +40,21 @@ export async function syncTenantShopifyCatalog(input: {
   }
 
   const config = getShopifyAppConfig(input.appOrigin);
+  const accessToken = await getShopifyAccessTokenForInstallation({
+    installation,
+    appOrigin: input.appOrigin,
+  });
+
   await assertShopifyAdminAccess({
     shop: installation.shopDomain,
-    accessToken: installation.accessToken,
+    accessToken,
     config,
   });
 
   const dataset = await buildCatalogDatasetFromShopify({
     shop: installation.shopDomain,
     storefrontDomain: installation.storefrontDomain,
-    accessToken: installation.accessToken,
+    accessToken,
     config,
   });
 

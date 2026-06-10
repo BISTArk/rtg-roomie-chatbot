@@ -287,6 +287,15 @@ export async function ensurePlatformSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_shopify_installations_shop_domain
           ON shopify_installations(shop_domain);
 
+        ALTER TABLE shopify_installations
+          ADD COLUMN IF NOT EXISTS access_token_expires_at TIMESTAMPTZ;
+
+        ALTER TABLE shopify_installations
+          ADD COLUMN IF NOT EXISTS refresh_token TEXT;
+
+        ALTER TABLE shopify_installations
+          ADD COLUMN IF NOT EXISTS refresh_token_expires_at TIMESTAMPTZ;
+
         ALTER TABLE conversation_analytics
           DROP CONSTRAINT IF EXISTS conversation_analytics_conversation_id_fkey;
       `);

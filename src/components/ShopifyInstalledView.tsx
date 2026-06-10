@@ -40,7 +40,7 @@ export function ShopifyInstalledView({
           <div className="mt-3 space-y-2 text-sm" style={{ color: "#b45309" }}>
             <p>
               Product catalog sync failed. This usually means the Shopify access token is missing,
-              invalid, or was created before the app credentials were corrected.
+              invalid, expired, or still using Shopify&apos;s deprecated non-expiring token format.
             </p>
             {catalogSyncError ? (
               <p className="rounded-xl border px-3 py-2 font-mono text-xs" style={{ borderColor: "#f59e0b", color: "#92400e" }}>
