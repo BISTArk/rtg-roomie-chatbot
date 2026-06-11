@@ -16,8 +16,18 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
+
   return (
     <html lang="en" className={cn("font-sans", inter.variable)}>
+      <head>
+        {shopifyApiKey ? (
+          <>
+            <meta name="shopify-api-key" content={shopifyApiKey} />
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+          </>
+        ) : null}
+      </head>
       <body>{children}</body>
     </html>
   );

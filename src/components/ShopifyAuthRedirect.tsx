@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { ShopifyEmbeddedBoot } from "@/components/ShopifyEmbeddedBoot";
 
 export function ShopifyAuthRedirect({
   installUrl,
@@ -39,6 +40,7 @@ export function ShopifyAuthRedirect({
 
   return (
     <main className="min-h-screen px-6 py-10" style={{ background: "var(--widget-surface-alt)" }}>
+      <ShopifyEmbeddedBoot />
       <div
         className="mx-auto max-w-2xl rounded-3xl border p-8 text-center"
         style={{ background: "var(--widget-surface)", borderColor: "var(--widget-border)" }}
