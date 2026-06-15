@@ -17,6 +17,7 @@ import { ChatFavourites } from "./ChatFavourites";
 import { ChatHistory } from "./ChatHistory";
 import { ChatMessages } from "./ChatMessages";
 import { ChatInput } from "./ChatInput";
+import { PrivacyNotice } from "./PrivacyNotice";
 import { WidgetAvatar } from "./WidgetAvatar";
 import {
   saveMessages,
@@ -25,6 +26,11 @@ import {
   initFromBridge,
   configureMessageStorageNamespace,
 } from "@/lib/chat-storage";
+import {
+  getSellerPrivacyPolicyUrl,
+  recordPrivacyAcceptance,
+  restorePrivacyAcceptanceFromBridge,
+} from "@/lib/privacy-consent";
 import { stripStageTag } from "@/lib/stage-tag";
 import {
   type VisitorProfile,
@@ -361,6 +367,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const tenantTokenRef = useRef(tenantToken);
   const sessionIdRef = useRef(sessionId);
   const hostOriginRef = useRef(getHostOrigin());
+  const [hostOrigin, setHostOrigin] = useState(getHostOrigin);
   const requestExtrasRef = useRef<Record<string, unknown> | null>(null);
   const isOpenRef = useRef(isOpen);
   const launcherRef = useRef<HTMLButtonElement>(null);
@@ -686,6 +693,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setSessionId(incomingSessionId);
         setStorageNamespaceState(incomingNamespace);
         hostOriginRef.current = String(data.hostOrigin || getHostOrigin()).trim() || getHostOrigin();
+        setHostOrigin(hostOriginRef.current);
+        restorePrivacyAcceptanceFromBridge(
+          typeof data.privacyAcceptedAt === "string" ? data.privacyAcceptedAt : null
+        );
         if (data.pageContext) setPageContext(data.pageContext);
         if (data.browsingHistory) setBrowsingHistory(data.browsingHistory);
 
@@ -969,6 +980,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       const standaloneSessionId = getBrowserSessionId();
       setSessionId(standaloneSessionId);
       hostOriginRef.current = getHostOrigin();
+      setHostOrigin(hostOriginRef.current);
 
       // Load the refresh-suppression flag from localStorage (same key the
       // embed bridge uses on the host page, so the two modes stay aligned).
@@ -1813,13 +1825,14 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, []);
 
   const handleOpen = useCallback(() => {
+    recordPrivacyAcceptance({ embed });
     setIsOpen(true);
     // If user is on a PDP and opens the chat, fire State 2 after dwell
     const ctx = pageContextRef.current;
     if (ctx && ctx.page === "pdp" && ctx.productName) {
       setTimeout(() => scheduleContextualForPdpRef.current?.(ctx), 300);
     }
-  }, []);
+  }, [embed]);
 
   const handleRefresh = useCallback(() => {
     const nextSessionId = createBrowserSessionId();
@@ -1909,6 +1922,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     async (text: string) => {
       if (!text.trim() || isStreaming || humanMode || !tenantTokenRef.current) return;
 
+      recordPrivacyAcceptance({ embed });
+
       if (hasPendingToolCalls(messagesRef.current)) {
         const cleaned = stripUnresolvedToolParts(messagesRef.current);
         messagesRef.current = cleaned;
@@ -1965,6 +1980,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     [sendMessage, isStreaming, humanMode, triggerHandoff, setMessages, embed, proactive]
   );
 
+  const sellerPrivacyPolicyUrl = getSellerPrivacyPolicyUrl(hostOrigin);
+
   const handleInterjectionAction = useCallback(
     (prompt: string) => {
       setShowInterjection(false);
@@ -2004,6 +2021,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       return;
     }
 
+    recordPrivacyAcceptance({ embed });
+
     const compactProducts = selectedProducts.map((product) => ({
       title: product.title || "Catalog product",
       category: product.category || "",
@@ -2042,7 +2061,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         },
       }
     );
-  }, [humanMode, isStreaming, proactive, selectedProducts, sendMessage]);
+  }, [embed, humanMode, isStreaming, proactive, selectedProducts, sendMessage]);
 
   const selectedProductKeys = selectedProducts
     .map((product) => product.productKey || product.sku || product.title || "")
@@ -2252,6 +2271,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                 </div>
               </div>
             ) : null}
+
+            <PrivacyNotice sellerPrivacyPolicyUrl={sellerPrivacyPolicyUrl} />
 
             <ChatInput
               onSend={handleSend}

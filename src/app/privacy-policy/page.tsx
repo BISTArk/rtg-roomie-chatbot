@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
+  MERCHANT_PRIVACY_ADDENDUM,
   PRIVACY_POLICY,
   PRIVACY_POLICY_SECTIONS,
 } from "@/content/privacy-policy";
@@ -8,7 +9,7 @@ import {
 export const metadata: Metadata = {
   title: "Privacy Policy | Shop Assist",
   description:
-    "Privacy Policy for Shop Assist, the AI shopping assistant for online storefronts.",
+    "U.S. Privacy Policy for Shop Assist, the AI shopping assistant for online storefronts.",
   robots: {
     index: true,
     follow: true,
@@ -34,12 +35,17 @@ export default function PrivacyPolicyPage() {
             {PRIVACY_POLICY.productName}
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-            Privacy Policy
+            Privacy Policy (United States)
           </h1>
           <p className="mt-4 text-sm leading-6" style={{ color: "var(--widget-text-muted)" }}>
             Effective date: {PRIVACY_POLICY.effectiveDate}
             <span className="mx-2">·</span>
             Last updated: {PRIVACY_POLICY.lastUpdated}
+          </p>
+          <p className="mt-4 text-[15px] leading-7">
+            This policy is intended for U.S. merchants and shoppers. If you use Shop Assist on a
+            merchant&apos;s website, that merchant&apos;s privacy policy applies together with this
+            policy.
           </p>
         </header>
 
@@ -58,6 +64,17 @@ export default function PrivacyPolicyPage() {
                     ))}
                   </ul>
                 ) : null}
+                {section.quote ? (
+                  <pre
+                    className="overflow-x-auto rounded-2xl border px-4 py-4 text-sm leading-6 whitespace-pre-wrap"
+                    style={{
+                      borderColor: "var(--widget-border)",
+                      backgroundColor: "var(--widget-surface-alt)",
+                    }}
+                  >
+                    {section.quote}
+                  </pre>
+                ) : null}
               </div>
             </section>
           ))}
@@ -71,6 +88,7 @@ export default function PrivacyPolicyPage() {
               }}
             >
               <p className="font-medium">{PRIVACY_POLICY.operatorName}</p>
+              <p className="mt-2">{PRIVACY_POLICY.operatorCountry}</p>
               <p className="mt-2">
                 Email:{" "}
                 <a
@@ -82,6 +100,22 @@ export default function PrivacyPolicyPage() {
                 </a>
               </p>
             </div>
+          </section>
+
+          <section id="merchant-copy-block" className="scroll-mt-8">
+            <h2 className="text-xl font-semibold tracking-tight">Quick copy for merchants</h2>
+            <p className="mt-4 text-[15px] leading-7">
+              Merchants may paste the following into their storefront privacy policy:
+            </p>
+            <pre
+              className="mt-4 overflow-x-auto rounded-2xl border px-4 py-4 text-sm leading-6 whitespace-pre-wrap"
+              style={{
+                borderColor: "var(--widget-border)",
+                backgroundColor: "var(--widget-surface-alt)",
+              }}
+            >
+              {MERCHANT_PRIVACY_ADDENDUM}
+            </pre>
           </section>
         </div>
 

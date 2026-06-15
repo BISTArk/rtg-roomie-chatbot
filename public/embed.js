@@ -27,6 +27,7 @@
     // clear it). Persists across page navigations and sessions.
     SUPPRESS_RETURNING: "suppress_returning",
     FAVOURITES: "favourites",
+    PRIVACY_ACCEPTANCE: "privacy_accepted_at",
   };
   var MAX_HISTORY = 30;
   var MSG_CONTEXT = "shop-assist-page-context-update";
@@ -682,6 +683,7 @@
           widgetOpen: wasOpen,
           isNewSession: isNewSession,
           suppressReturning: safeGet(scopedStorageKey(STORAGE.SUPPRESS_RETURNING)) === "1",
+          privacyAcceptedAt: safeGet(scopedStorageKey(STORAGE.PRIVACY_ACCEPTANCE)),
           proactiveAttemptCount: getProactiveAttemptCount(),
           tenantKey: tenantKey,
           storageNamespace: storageNamespace,
@@ -791,6 +793,12 @@
           // Customer just sent their first message after a refresh —
           // they're engaging again, so personalization can resume.
           safeRemove(scopedStorageKey(STORAGE.SUPPRESS_RETURNING));
+          break;
+
+        case "shop-assist-save-privacy-acceptance":
+          if (typeof e.data.timestamp === "string" && e.data.timestamp.trim()) {
+            safeSet(scopedStorageKey(STORAGE.PRIVACY_ACCEPTANCE), e.data.timestamp.trim());
+          }
           break;
 
         case "shop-assist-save-proactive-attempts":
