@@ -491,10 +491,9 @@ function buildStorageNamespace(tenantKey: string): string {
   return tenantKey.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
 }
 
-async function seedDefaultTenant(): Promise<void> {
-  if (!hasDatabase()) return;
-  await ensurePlatformSchema();
+let defaultTenantSeedReady: Promise<void> | null = null;
 
+async function runDefaultTenantSeed(): Promise<void> {
   await withDb(async (client) => {
     await client.query("BEGIN");
     try {
@@ -593,6 +592,22 @@ async function seedDefaultTenant(): Promise<void> {
       throw error;
     }
   });
+}
+
+async function ensureDefaultTenantSeeded(): Promise<void> {
+  if (!hasDatabase()) return;
+  await ensurePlatformSchema();
+  if (!defaultTenantSeedReady) {
+    defaultTenantSeedReady = runDefaultTenantSeed().catch((error) => {
+      defaultTenantSeedReady = null;
+      throw error;
+    });
+  }
+  await defaultTenantSeedReady;
+}
+
+async function seedDefaultTenant(): Promise<void> {
+  await ensureDefaultTenantSeeded();
 }
 
 async function loadTenantDomains(client: PoolClient, tenantId: string): Promise<string[]> {
@@ -739,7 +754,10 @@ export async function resolveTenant(
     };
   }
 
-  await seedDefaultTenant();
+  await ensurePlatformSchema();
+  if (normalizedKey === DEFAULT_TENANT_KEY) {
+    await ensureDefaultTenantSeeded();
+  }
   return withDb(async (client) => {
     const result = await client.query<TenantRow>(
       `SELECT * FROM tenants WHERE tenant_key = $1 LIMIT 1`,
@@ -776,7 +794,7 @@ export async function resolveTenantByDomain(
       : null;
   }
 
-  await seedDefaultTenant();
+  await ensurePlatformSchema();
   return withDb(async (client) => {
     const tenantId = await findPreferredTenantIdByDomains(client, [normalizedHostname]);
     if (!tenantId) return null;

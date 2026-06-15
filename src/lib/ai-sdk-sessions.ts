@@ -198,19 +198,36 @@ export async function saveAiSdkSessionState(input: {
 
       await client.query(`DELETE FROM messages_v2 WHERE session_id = $1`, [sessionRowId]);
 
-      for (let index = 0; index < sanitizedMessages.length; index++) {
-        const message = sanitizedMessages[index];
+      if (sanitizedMessages.length > 0) {
+        const ids: string[] = [];
+        const sessionIds: string[] = [];
+        const sortOrders: number[] = [];
+        const roles: Array<"user" | "assistant"> = [];
+        const texts: string[] = [];
+        const partsJson: Array<string | null> = [];
+
+        for (let index = 0; index < sanitizedMessages.length; index++) {
+          const message = sanitizedMessages[index];
+          ids.push(message.id || randomUUID());
+          sessionIds.push(sessionRowId);
+          sortOrders.push(index);
+          roles.push(message.role);
+          texts.push(message.text);
+          partsJson.push(message.parts?.length ? JSON.stringify(message.parts) : null);
+        }
+
         await client.query(
           `INSERT INTO messages_v2 (id, session_id, sort_order, role, text, parts_json)
-           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-          [
-            message.id || randomUUID(),
-            sessionRowId,
-            index,
-            message.role,
-            message.text,
-            message.parts?.length ? JSON.stringify(message.parts) : null,
-          ]
+           SELECT *
+           FROM UNNEST(
+             $1::text[],
+             $2::text[],
+             $3::int[],
+             $4::text[],
+             $5::text[],
+             $6::jsonb[]
+           ) AS inserted (id, session_id, sort_order, role, text, parts_json)`,
+          [ids, sessionIds, sortOrders, roles, texts, partsJson]
         );
       }
 
@@ -246,36 +263,32 @@ export async function listAiSdkSessionHistory(
       preview_text: string;
       created_at: string;
       updated_at: string;
+      message_count: string;
     }>(
-      `SELECT client_session_id, title, preview_text, created_at, updated_at
-       FROM sessions_v2
-       WHERE tenant_id = $1
-       ORDER BY updated_at DESC
+      `SELECT
+         s.client_session_id,
+         s.title,
+         s.preview_text,
+         s.created_at,
+         s.updated_at,
+         COUNT(m.id)::text AS message_count
+       FROM sessions_v2 s
+       LEFT JOIN messages_v2 m ON m.session_id = s.id
+       WHERE s.tenant_id = $1
+       GROUP BY s.id, s.client_session_id, s.title, s.preview_text, s.created_at, s.updated_at
+       ORDER BY s.updated_at DESC
        LIMIT $2`,
       [tenantId, Math.max(1, Math.min(limit, 100))]
     );
 
-    const items: SessionHistoryItem[] = [];
-    for (const row of sessions.rows) {
-      const countResult = await client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count
-         FROM messages_v2 m
-         INNER JOIN sessions_v2 s ON s.id = m.session_id
-         WHERE s.tenant_id = $1 AND s.client_session_id = $2`,
-        [tenantId, row.client_session_id]
-      );
-
-      items.push({
-        sessionId: row.client_session_id,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        title: row.title || "New Chat",
-        previewText: row.preview_text || "",
-        messageCount: Number.parseInt(countResult.rows[0]?.count || "0", 10),
-      });
-    }
-
-    return items;
+    return sessions.rows.map((row) => ({
+      sessionId: row.client_session_id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      title: row.title || "New Chat",
+      previewText: row.preview_text || "",
+      messageCount: Number.parseInt(row.message_count || "0", 10),
+    }));
   });
 }
 
