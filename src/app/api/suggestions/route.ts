@@ -1,4 +1,4 @@
-import { generateSuggestions } from "@/lib/suggestions";
+import { generateSuggestions, type SuggestionsContext } from "@/lib/suggestions";
 import { resolveTenantFromToken } from "@/lib/tenant-platform";
 import type { UIMessage } from "ai";
 
@@ -8,6 +8,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       messages?: UIMessage[];
       tenantKey?: string;
+      context?: SuggestionsContext;
     };
 
     const tenantKey = body.tenantKey?.trim() || "";
@@ -18,7 +19,9 @@ export async function POST(request: Request) {
     await resolveTenantFromToken(tenantKey, tenantToken);
 
     const messages = Array.isArray(body.messages) ? body.messages : [];
-    const suggestions = await generateSuggestions(messages);
+    const context =
+      body.context && typeof body.context === "object" ? body.context : undefined;
+    const suggestions = await generateSuggestions(messages, context);
     return Response.json({ suggestions });
   } catch (error) {
     return Response.json(

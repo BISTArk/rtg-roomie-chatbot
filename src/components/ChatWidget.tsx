@@ -68,21 +68,26 @@ import {
   toggleFavouriteInList,
   type FavouriteProduct,
 } from "@/lib/favourites-storage";
-import { fetchSuggestions } from "@/lib/chat-suggestions";
 import {
-  parseAssistantMarkup,
-  type ParsedAssistantMarkup,
-} from "@/lib/assistant-html";
+  fetchSuggestions,
+  getProactiveSuggestionFallbacks,
+} from "@/lib/chat-suggestions";
 import {
   commitTransientProactiveMessages,
   createInterjectionMessageId,
+  createProactiveMessageId,
   dismissInterjection,
   INTERJECTION_DISMISSED_KEY,
   isInterjectionDismissed,
   isTransientProactiveMessage,
+  messageHasContextualStage,
+  messageHasNewSessionStage,
+  messageNeedsPeekSuggestions,
   pickInterjectionType,
   STANDALONE_INTERJECTION_DELAY_MS,
+  type InterjectionType,
 } from "@/lib/interjection";
+import type { SuggestionsContext } from "@/lib/suggestions";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import type { SessionHistoryItem, TenantBootstrap } from "@/lib/platform-types";
@@ -97,6 +102,11 @@ import {
 } from "@/lib/pre-engagement";
 
 export type ChatMessage = PersistedChatMessage;
+
+type ProactivePeekContent = {
+  prose: string;
+  suggestions?: string[];
+};
 
 export type { PageContext };
 
@@ -281,7 +291,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [showInterjection, setShowInterjection] = useState(false);
   const [interjectionContent, setInterjectionContent] =
-    useState<ParsedAssistantMarkup | null>(null);
+    useState<ProactivePeekContent | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string>("");
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
@@ -355,6 +365,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const isOpenRef = useRef(isOpen);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const interjectionRef = useRef<HTMLDivElement>(null);
+  const proactivePeekRef = useRef<ProactivePeekContent | null>(null);
   // Durable flag: set when user clicks the in-chat refresh icon. Blocks
   // returning-style greetings until they actually send a message. Storage is
   // bridged to embed.js → host localStorage so it persists across tabs
@@ -483,18 +494,6 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     if (isOpen) {
       setShowInterjection(false);
       setInterjectionContent(null);
-    } else {
-      const lastTransient = [...messagesRef.current]
-        .reverse()
-        .find(isTransientProactiveMessage);
-      if (lastTransient) {
-        const text = stripStageTag(getTextFromUIMessage(lastTransient)).trim();
-        const parsed = text ? parseAssistantMarkup(text) : null;
-        if (parsed?.prose) {
-          setInterjectionContent(parsed);
-          setShowInterjection(true);
-        }
-      }
     }
     // Tell embed.js to resize the iframe
     if (embed && typeof window !== "undefined" && window.parent !== window) {
@@ -1228,10 +1227,67 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     }
   }, []);
 
-  const presentProactiveAssistantMessage = useCallback((message: UIMessage) => {
+  const presentProactivePeekWithSuggestions = useCallback(
+    (message: UIMessage, proactiveSuggestions: string[]) => {
+      let suggestionsForPeek = proactiveSuggestions
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean);
+      const prose = stripStageTag(getTextFromUIMessage(message)).trim();
+
+      if (!prose) {
+        return;
+      }
+
+      if (suggestionsForPeek.length === 0 && messageNeedsPeekSuggestions(message)) {
+        suggestionsForPeek =
+          messageHasNewSessionStage(message)
+            ? getProactiveSuggestionFallbacks("new-session")
+            : getProactiveSuggestionFallbacks(
+                "interjection",
+                pickInterjectionType({
+                  pageContext: pageContextRef.current,
+                  messages: messagesRef.current,
+                  browsingHistory: browsingHistoryRef.current,
+                })
+              );
+      }
+
+      if (suggestionsForPeek.length === 0) {
+        return;
+      }
+
+      const nextMessages = [
+        ...messagesRef.current.filter((entry) => !isTransientProactiveMessage(entry)),
+        message,
+      ];
+
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
+      setSuggestions(suggestionsForPeek);
+
+      if (!hasUserEngaged(nextMessages)) {
+        recordProactiveAttempt();
+      }
+
+      const peekContent = { prose, suggestions: suggestionsForPeek };
+      proactivePeekRef.current = peekContent;
+
+      if (!isOpenRef.current) {
+        setInterjectionContent(peekContent);
+        setShowInterjection(true);
+        return;
+      }
+
+      setShowInterjection(false);
+      setInterjectionContent(null);
+    },
+    [setMessages]
+  );
+
+  const presentContextualProactiveMessage = useCallback((message: UIMessage) => {
     const storedMessage: UIMessage = {
       ...message,
-      id: createInterjectionMessageId(message.id),
+      id: createProactiveMessageId(message.id),
     };
 
     const nextMessages = [
@@ -1245,10 +1301,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       recordProactiveAttempt();
     }
 
-    const text = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
-    const parsed = text ? parseAssistantMarkup(text) : null;
-    if (parsed?.prose && !isOpenRef.current) {
-      setInterjectionContent(parsed);
+    const prose = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+    if (prose && !isOpenRef.current) {
+      setInterjectionContent({ prose });
       setShowInterjection(true);
       return;
     }
@@ -1256,6 +1311,130 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     setShowInterjection(false);
     setInterjectionContent(null);
   }, [setMessages]);
+
+  const loadProactiveSuggestions = useCallback(
+    async (candidateMessages: UIMessage[], context: SuggestionsContext): Promise<string[]> => {
+      const assistantMessage = stripStageTag(
+        getTextFromUIMessage(candidateMessages[candidateMessages.length - 1] || {
+          id: "",
+          role: "assistant",
+          parts: [],
+        })
+      ).trim();
+      const requestContext: SuggestionsContext = {
+        ...context,
+        assistantMessage: assistantMessage || context.assistantMessage,
+        pageContext: context.pageContext ?? pageContextRef.current ?? undefined,
+        browsingHistory:
+          context.browsingHistory ??
+          (browsingHistoryRef.current.length > 0 ? browsingHistoryRef.current : undefined),
+      };
+
+      if (!tenantTokenRef.current || !tenantKeyRef.current) {
+        return requestContext.mode && requestContext.mode !== "follow-up"
+          ? getProactiveSuggestionFallbacks(
+              requestContext.mode,
+              requestContext.interjectionType
+            )
+          : [];
+      }
+
+      try {
+        const parsed = await fetchSuggestions(
+          candidateMessages,
+          tenantTokenRef.current,
+          tenantKeyRef.current,
+          requestContext
+        );
+        if (parsed.length > 0) return parsed;
+      } catch {
+        // fall through to defaults
+      }
+
+      return requestContext.mode && requestContext.mode !== "follow-up"
+        ? getProactiveSuggestionFallbacks(
+            requestContext.mode,
+            requestContext.interjectionType
+          )
+        : [];
+    },
+    []
+  );
+
+  const resolvePeekSuggestionContext = useCallback(
+    (message: UIMessage): SuggestionsContext => {
+      if (messageHasNewSessionStage(message)) {
+        return {
+          mode: "new-session",
+          assistantMessage: stripStageTag(getTextFromUIMessage(message)).trim(),
+        };
+      }
+
+      return {
+        mode: "interjection",
+        interjectionType: pickInterjectionType({
+          pageContext: pageContextRef.current,
+          messages: messagesRef.current,
+          browsingHistory: browsingHistoryRef.current,
+        }),
+        assistantMessage: stripStageTag(getTextFromUIMessage(message)).trim(),
+      };
+    },
+    []
+  );
+
+  const restoreProactivePeekBubble = useCallback(async () => {
+    if (isOpenRef.current) return;
+
+    const lastTransient = [...messagesRef.current]
+      .reverse()
+      .find(isTransientProactiveMessage);
+    if (!lastTransient) return;
+
+    const prose = stripStageTag(getTextFromUIMessage(lastTransient)).trim();
+    if (!prose) return;
+
+    if (messageNeedsPeekSuggestions(lastTransient)) {
+      let peekSuggestions =
+        proactivePeekRef.current?.suggestions?.length
+          ? proactivePeekRef.current.suggestions
+          : suggestionsRef.current.filter(Boolean);
+
+      if (peekSuggestions.length === 0) {
+        peekSuggestions = await loadProactiveSuggestions(
+          messagesRef.current,
+          resolvePeekSuggestionContext(lastTransient)
+        );
+      }
+
+      if (peekSuggestions.length === 0) {
+        const context = resolvePeekSuggestionContext(lastTransient);
+        peekSuggestions = getProactiveSuggestionFallbacks(
+          context.mode === "new-session" ? "new-session" : "interjection",
+          context.interjectionType
+        );
+      }
+
+      if (peekSuggestions.length === 0) return;
+
+      const content = { prose, suggestions: peekSuggestions };
+      proactivePeekRef.current = content;
+      setSuggestions(peekSuggestions);
+      setInterjectionContent(content);
+      setShowInterjection(true);
+      return;
+    }
+
+    if (messageHasContextualStage(lastTransient)) {
+      setInterjectionContent({ prose });
+      setShowInterjection(true);
+    }
+  }, [loadProactiveSuggestions, resolvePeekSuggestionContext]);
+
+  useEffect(() => {
+    if (!loaded || isOpen) return;
+    void restoreProactivePeekBubble();
+  }, [loaded, isOpen, messages, restoreProactivePeekBubble]);
 
   const consumeAssistantStream = useCallback(
     async (stream: ReadableStream<UIMessageChunk>) => {
@@ -1375,11 +1554,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       });
       const commentary = await readAssistantStream(chunkStream);
       if (!commentary) return;
-      presentProactiveAssistantMessage(commentary);
+      presentContextualProactiveMessage(commentary);
     } catch (err) {
       console.log("[proactive] contextual API call failed:", err);
     }
-  }, [transport, messages, gatedFire, readAssistantStream, presentProactiveAssistantMessage]);
+  }, [transport, messages, gatedFire, readAssistantStream, presentContextualProactiveMessage]);
 
   // State 1: Fire re-engagement after 20min idle. Requires prior conversation.
   const triggerReengagement = useCallback(async () => {
@@ -1400,18 +1579,25 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         abortSignal: new AbortController().signal,
       });
       await consumeAssistantStream(chunkStream);
+      const proactiveSuggestions = await loadProactiveSuggestions(messagesRef.current, {
+        mode: "reengagement",
+      });
+      if (proactiveSuggestions.length > 0) {
+        setSuggestions(proactiveSuggestions);
+      }
     } catch {
       /* swallow */
     }
-  }, [transport, messages, gatedFire, consumeAssistantStream]);
+  }, [transport, messages, gatedFire, consumeAssistantStream, loadProactiveSuggestions]);
 
   // State 3: Fire an interjection. Subtype selects the sub-template.
   const triggerInterjection = useCallback(async (interjectionType: string) => {
     if (!gatedFire("interjection")) return;
+    const typedInterjection = interjectionType as InterjectionType;
     try {
       requestExtrasRef.current = {
         type: "interjection",
-        interjectionType,
+        interjectionType: typedInterjection,
         visitorProfile: visitorProfileRef.current ?? undefined,
         pageContext: pageContextRef.current,
       };
@@ -1424,11 +1610,29 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       });
       const interjection = await readAssistantStream(chunkStream);
       if (!interjection) return;
-      presentProactiveAssistantMessage(interjection);
+
+      const storedMessage: UIMessage = {
+        ...interjection,
+        id: createInterjectionMessageId(interjection.id),
+      };
+      const candidateMessages = [
+        ...messagesRef.current.filter((entry) => !isTransientProactiveMessage(entry)),
+        storedMessage,
+      ];
+      const prose = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+      if (!prose) return;
+
+      const interjectionSuggestions = await loadProactiveSuggestions(candidateMessages, {
+        mode: "interjection",
+        interjectionType: typedInterjection,
+        assistantMessage: prose,
+      });
+
+      presentProactivePeekWithSuggestions(storedMessage, interjectionSuggestions);
     } catch {
       /* swallow */
     }
-  }, [transport, messages, gatedFire, readAssistantStream, presentProactiveAssistantMessage]);
+  }, [transport, messages, gatedFire, readAssistantStream, loadProactiveSuggestions, presentProactivePeekWithSuggestions]);
 
   // State 4: Greet on fresh session. For returning customers with prior chat
   // history, the greeting is APPENDED (history stays). For new customers with
@@ -1458,10 +1662,17 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         abortSignal: new AbortController().signal,
       });
       await consumeAssistantStream(chunkStream);
+      const proactiveSuggestions = await loadProactiveSuggestions(messagesRef.current, {
+        mode: "upsell",
+        pageContext: pageContextRef.current ?? undefined,
+      });
+      if (proactiveSuggestions.length > 0) {
+        setSuggestions(proactiveSuggestions);
+      }
     } catch (err) {
       console.log("[proactive] upsell API call failed:", err);
     }
-  }, [transport, messages, humanMode, gatedFire, consumeAssistantStream]);
+  }, [transport, messages, humanMode, gatedFire, consumeAssistantStream, loadProactiveSuggestions]);
 
   const triggerNewSessionGreeting = useCallback(async () => {
     if (sessionStartGreetingFiredRef.current) return;
@@ -1497,14 +1708,37 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         abortSignal: new AbortController().signal,
       });
       const greeting = await readAssistantStream(chunkStream);
-      if (greeting) {
-        presentProactiveAssistantMessage(greeting);
-      }
+      if (!greeting) return;
+
+      const storedMessage: UIMessage = {
+        ...greeting,
+        id: createProactiveMessageId(greeting.id),
+      };
+      const candidateMessages = [
+        ...messagesRef.current.filter((entry) => !isTransientProactiveMessage(entry)),
+        storedMessage,
+      ];
+      const prose = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+      if (!prose) return;
+
+      const greetingSuggestions = await loadProactiveSuggestions(candidateMessages, {
+        mode: "new-session",
+        assistantMessage: prose,
+      });
+      presentProactivePeekWithSuggestions(storedMessage, greetingSuggestions);
     } catch {
       sessionStartGreetingFiredRef.current = false;
       if (!hasPriorChat) setMessages([welcomeUi]);
     }
-  }, [transport, setMessages, gatedFire, welcomeUi, readAssistantStream, presentProactiveAssistantMessage]);
+  }, [
+    transport,
+    setMessages,
+    gatedFire,
+    welcomeUi,
+    readAssistantStream,
+    loadProactiveSuggestions,
+    presentProactivePeekWithSuggestions,
+  ]);
 
   // Wire up the refs so the message handler (stable across renders) can
   // call the latest version of these callbacks.
@@ -1681,6 +1915,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setMessages(cleaned);
       }
 
+      const committed = commitTransientProactiveMessages(messagesRef.current);
+      if (committed !== messagesRef.current) {
+        messagesRef.current = committed;
+        setMessages(committed);
+        proactivePeekRef.current = null;
+      }
+
       // User typing = CONVERSATION mode. Reset all proactive timers/counters.
       const now = Date.now();
       lastActivityAtRef.current = now;
@@ -1728,6 +1969,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     (prompt: string) => {
       setShowInterjection(false);
       setInterjectionContent(null);
+      proactivePeekRef.current = null;
 
       const committed = commitTransientProactiveMessages(messagesRef.current);
       messagesRef.current = committed;
@@ -1855,18 +2097,18 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                   {interjectionContent.prose}
                 </MessageResponse>
               </button>
-              {interjectionContent.actions.length > 0 ? (
+              {interjectionContent.suggestions && interjectionContent.suggestions.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {interjectionContent.actions.map((action) => (
+                  {interjectionContent.suggestions.map((suggestion) => (
                     <Button
-                      key={`${action.label}-${action.prompt}`}
+                      key={suggestion}
                       type="button"
                       variant="outline"
                       size="sm"
                       className="h-auto min-h-8 whitespace-normal rounded-full px-4 py-2 text-xs"
-                      onClick={() => handleInterjectionAction(action.prompt)}
+                      onClick={() => handleInterjectionAction(suggestion)}
                     >
-                      {action.label}
+                      {suggestion}
                     </Button>
                   ))}
                 </div>
@@ -1876,6 +2118,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                 onClick={() => {
                   setShowInterjection(false);
                   setInterjectionContent(null);
+                  proactivePeekRef.current = null;
+                  setSuggestions([]);
                   setMessages((prev) =>
                     prev.filter((message) => !isTransientProactiveMessage(message))
                   );

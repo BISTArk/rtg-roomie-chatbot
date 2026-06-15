@@ -3,6 +3,7 @@ import type { BrowsingHistoryEntry, PageContext } from "@/lib/system-prompt";
 import { detectStageFromResponse, stripStageTag } from "@/lib/stage-tag";
 
 export const INTERJECTION_MESSAGE_ID_PREFIX = "interjection-";
+export const PROACTIVE_TRANSIENT_ID_PREFIX = "proactive-transient-";
 export const COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX = "proactive-";
 
 const TRANSIENT_STAGES = new Set([
@@ -35,6 +36,46 @@ export function messageHasInterjectionStage(message: UIMessage): boolean {
   );
 }
 
+export function messageHasNewSessionStage(message: UIMessage): boolean {
+  return getTextParts(message).some(
+    (part) => getTransientStageFromText(part.text) === "new-session"
+  );
+}
+
+export function messageHasContextualStage(message: UIMessage): boolean {
+  return getTextParts(message).some(
+    (part) => getTransientStageFromText(part.text) === "contextual"
+  );
+}
+
+export function isNewSessionMessage(message: UIMessage): boolean {
+  return messageHasNewSessionStage(message);
+}
+
+/** Proactive peek bubbles that show prose + suggestion chips together. */
+export function messageNeedsPeekSuggestions(message: UIMessage): boolean {
+  return (
+    messageHasInterjectionStage(message) ||
+    messageHasNewSessionStage(message) ||
+    message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX) ||
+    message.id.includes(PROACTIVE_TRANSIENT_ID_PREFIX)
+  );
+}
+
+/** @deprecated Use messageNeedsPeekSuggestions */
+export function supportsProactivePeekWithSuggestions(message: UIMessage): boolean {
+  return messageNeedsPeekSuggestions(message);
+}
+
+export function createProactiveMessageId(suffix?: string) {
+  const id =
+    suffix ??
+    (typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}`);
+  return `${PROACTIVE_TRANSIENT_ID_PREFIX}${id}`;
+}
+
 export function createInterjectionMessageId(suffix?: string) {
   const id =
     suffix ??
@@ -46,12 +87,16 @@ export function createInterjectionMessageId(suffix?: string) {
 
 export function isInterjectionMessage(messageOrId: UIMessage | string): boolean {
   if (typeof messageOrId === "string") {
-    return messageOrId.includes(INTERJECTION_MESSAGE_ID_PREFIX);
+    return false;
   }
 
+  return messageHasInterjectionStage(messageOrId);
+}
+
+function hasProactiveTransientId(messageId: string): boolean {
   return (
-    messageOrId.id.includes(INTERJECTION_MESSAGE_ID_PREFIX) ||
-    messageHasInterjectionStage(messageOrId)
+    messageId.includes(PROACTIVE_TRANSIENT_ID_PREFIX) ||
+    messageId.includes(INTERJECTION_MESSAGE_ID_PREFIX)
   );
 }
 
@@ -59,7 +104,7 @@ export function isInterjectionMessage(messageOrId: UIMessage | string): boolean 
 export function isTransientProactiveMessage(message: UIMessage): boolean {
   if (message.role !== "assistant") return false;
   if (message.id === "welcome") return false;
-  if (message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX)) return true;
+  if (hasProactiveTransientId(message.id)) return true;
   return getTextParts(message).some(
     (part) => getTransientStageFromText(part.text) != null
   );
@@ -72,6 +117,13 @@ function promoteCommittedAssistantId(messageId: string): string {
 
   if (messageId.includes(INTERJECTION_MESSAGE_ID_PREFIX)) {
     const suffix = messageId.slice(INTERJECTION_MESSAGE_ID_PREFIX.length).trim();
+    return suffix
+      ? `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${suffix}`
+      : `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${Date.now()}`;
+  }
+
+  if (messageId.includes(PROACTIVE_TRANSIENT_ID_PREFIX)) {
+    const suffix = messageId.slice(PROACTIVE_TRANSIENT_ID_PREFIX.length).trim();
     return suffix
       ? `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${suffix}`
       : `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${Date.now()}`;
@@ -195,9 +247,17 @@ export function splitTransientAssistantMessages(messages: UIMessage[]): UIMessag
       if (only?.stage === "interjection") {
         split.push({
           ...message,
-          id: isInterjectionMessage(message.id)
+          id: message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX)
             ? message.id
             : createInterjectionMessageId(message.id),
+          parts: only.parts,
+        });
+      } else if (only?.stage === "new-session") {
+        split.push({
+          ...message,
+          id: message.id.includes(PROACTIVE_TRANSIENT_ID_PREFIX)
+            ? message.id
+            : createProactiveMessageId(message.id),
           parts: only.parts,
         });
       } else {
@@ -236,6 +296,22 @@ export const INTERJECTION_TYPES = [
 ] as const;
 
 export type InterjectionType = (typeof INTERJECTION_TYPES)[number];
+
+export const INTERJECTION_SUGGESTION_FALLBACKS: Record<InterjectionType, string[]> = {
+  compare: ["Compare them side-by-side", "Help me decide", "Just browsing"],
+  inform: ["Tell me more", "Check sizes and price", "I'm good thanks"],
+  guide: ["Help me pick a mattress", "Show bestsellers", "Just browsing"],
+  social: ["Show accessories", "Compare similar picks", "Just browsing"],
+  resume: ["Yes, let's continue", "Just browsing", "Help me find a store", "Talk to an agent"],
+};
+
+export const PROACTIVE_SUGGESTION_FALLBACKS = {
+  "new-session": ["Help me pick a mattress", "Show bestsellers", "Just browsing"],
+  reengagement: ["Yes, show me", "Just browsing", "Help me find a store", "Talk to an agent"],
+  upsell: ["Show me protectors", "Other accessories", "I'm all set"],
+} as const;
+
+export type ProactiveSuggestionMode = keyof typeof PROACTIVE_SUGGESTION_FALLBACKS;
 
 export const STANDALONE_INTERJECTION_DELAY_MS = 8_000;
 export const INTERJECTION_DISMISSED_KEY = "interjection_dismissed";

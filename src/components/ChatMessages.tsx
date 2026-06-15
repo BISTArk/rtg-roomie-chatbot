@@ -21,10 +21,10 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import { WidgetAvatar } from "./WidgetAvatar";
-import { parseAssistantMarkup } from "@/lib/assistant-html";
 import { chatQuickSuggestions } from "@/lib/chat-suggestions";
 import {
-  isTransientProactiveMessage,
+  isInterjectionMessage,
+  isNewSessionMessage,
   shouldMergeAssistantMessages,
   splitTransientAssistantMessages,
 } from "@/lib/interjection";
@@ -170,6 +170,8 @@ type CompareRecommendation = {
 
 function cleanTextSegment(text: string): string {
   return text
+    .replace(/```html[\s\S]*?```/gi, "")
+    .replace(/<div[^>]*class="[^"]*flex-wrap[^"]*"[\s\S]*?<\/div>/gi, "")
     .replace(/^\s*What would you like to do\?\s*$/gim, "")
     .trim();
 }
@@ -780,59 +782,6 @@ function CompareToolCard({ output }: { output: unknown }) {
   );
 }
 
-function InterjectionMessageBubble({
-  message,
-  branding,
-  theme,
-  onPillSelect,
-}: {
-  message: UIMessage;
-  branding: WidgetBranding;
-  theme: WidgetTheme;
-  onPillSelect?: (prompt: string) => void;
-}) {
-  const text = message.parts.map(getTextPart).join("");
-  const parsed = parseAssistantMarkup(stripStageTag(text));
-  if (!parsed.prose && parsed.actions.length === 0) return null;
-
-  return (
-    <div className="chat-bubble-enter flex w-full flex-col gap-1.5">
-      <div className="flex items-center gap-2 pl-1">
-        <WidgetAvatar size={24} branding={branding} theme={theme} />
-        <Badge className="text-[12px] font-bold">{branding.assistantName}</Badge>
-      </div>
-      <Card className="rounded-2xl py-0 shadow-sm">
-        <CardContent className="space-y-2 px-4 py-3">
-          {parsed.prose ? (
-            <MessageResponse
-              className="streamdown-content text-sm"
-              mode="static"
-              linkSafety={{ enabled: false }}
-            >
-              {parsed.prose}
-            </MessageResponse>
-          ) : null}
-          {parsed.actions.length > 0 && onPillSelect ? (
-            <div className="flex flex-wrap gap-2">
-              {parsed.actions.map((action) => (
-                <Button
-                  key={`${action.label}-${action.prompt}`}
-                  type="button"
-                  variant="secondary"
-                  className={suggestionButtonClassName}
-                  onClick={() => onPillSelect(action.prompt)}
-                >
-                  {action.label}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 function isRenderableAssistantBubblePart(part: UIMessage["parts"][number]) {
   return (
     (part.type === "text" && part.text.trim().length > 0) ||
@@ -852,7 +801,6 @@ function MessageBubble({
   favouriteProductKeys,
   onToggleCompareSelection,
   onToggleFavourite,
-  onPillSelect,
 }: {
   message: UIMessage;
   isLastAssistant: boolean;
@@ -863,7 +811,6 @@ function MessageBubble({
     toolCallId: string;
     answers: Array<{ header: string; question: string; answer: string }>;
   }) => void;
-  onPillSelect?: (prompt: string) => void;
   selectedProductKeys: string[];
   favouriteProductKeys: string[];
   onToggleCompareSelection: (product: SelectableProductCard) => void;
@@ -938,7 +885,6 @@ function MessageBubble({
                           key={`${message.id}-text-${blockIndex}-${index}`}
                           text={part.text}
                           isStreaming={isLastAssistant && isStreaming}
-                          onPillSelect={onPillSelect}
                         />
                       );
                     }
@@ -980,57 +926,35 @@ function MessageBubble({
 function FormattedMessage({
   text,
   isStreaming,
-  onPillSelect,
 }: {
   text: string;
   isStreaming: boolean;
-  onPillSelect?: (prompt: string) => void;
 }) {
-  const parsed = parseAssistantMarkup(stripStageTag(text));
-  const content = cleanTextSegment(parsed.prose);
-  if (!content && parsed.actions.length === 0) return null;
+  const content = cleanTextSegment(stripStageTag(text));
+  if (!content) return null;
 
   return (
-    <div className="space-y-1.5">
-      {content ? (
-        <MessageResponse
-          className="streamdown-content text-sm"
-          mode={isStreaming ? "streaming" : "static"}
-          parseIncompleteMarkdown={isStreaming}
-          linkSafety={{ enabled: false }}
-          components={{
-            a: ({ href, children, ...rest }) => (
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "var(--widget-accent)", textDecoration: "underline" }}
-                {...rest}
-              >
-                {children}
-              </a>
-            ),
-          }}
-        >
-          {content}
-        </MessageResponse>
-      ) : null}
-      {!isStreaming && parsed.actions.length > 0 && onPillSelect ? (
-        <div className="flex flex-wrap gap-2 px-1">
-          {parsed.actions.map((action) => (
-            <Button
-              key={`${action.label}-${action.prompt}`}
-              type="button"
-              variant="secondary"
-              className={suggestionButtonClassName}
-              onClick={() => onPillSelect(action.prompt)}
-            >
-              {action.label}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-    </div>
+    <MessageResponse
+      className="streamdown-content text-sm"
+      mode={isStreaming ? "streaming" : "static"}
+      parseIncompleteMarkdown={isStreaming}
+      linkSafety={{ enabled: false }}
+      components={{
+        a: ({ href, children, ...rest }) => (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "var(--widget-accent)", textDecoration: "underline" }}
+            {...rest}
+          >
+            {children}
+          </a>
+        ),
+      }}
+    >
+      {content}
+    </MessageResponse>
   );
 }
 
@@ -1117,6 +1041,12 @@ export function ChatMessages({
     !isStreaming &&
     !hasPendingAssistant;
   const proactiveBudgetSpent = isProactiveBudgetExhausted(messages);
+  const lastGroupedMessage = groupedMessages[groupedMessages.length - 1];
+  const showProactiveSuggestions =
+    lastGroupedMessage?.role === "assistant" &&
+    suggestions.length > 0 &&
+    (isInterjectionMessage(lastGroupedMessage) ||
+      isNewSessionMessage(lastGroupedMessage));
 
   return (
     <ConversationRoot
@@ -1158,35 +1088,26 @@ export function ChatMessages({
             </ConversationEmptyState>
           ) : (
             <>
-              {groupedMessages.map((msg, index) =>
-                isTransientProactiveMessage(msg) ? (
-                  <InterjectionMessageBubble
-                    key={msg.id}
-                    message={msg}
-                    branding={branding}
-                    theme={theme}
-                    onPillSelect={onSuggestionSelect}
-                  />
-                ) : (
-                  <MessageBubble
-                    key={msg.id}
-                    message={msg}
-                    isLastAssistant={
-                      msg.role === "assistant" && index === groupedMessages.length - 1
-                    }
-                    isStreaming={isStreaming}
-                    branding={branding}
-                    theme={theme}
-                    onToolOptionSelect={onToolOptionSelect}
-                    onPillSelect={onSuggestionSelect}
-                    selectedProductKeys={selectedProductKeys}
-                    favouriteProductKeys={favouriteProductKeys}
-                    onToggleCompareSelection={onToggleCompareSelection}
-                    onToggleFavourite={onToggleFavourite}
-                  />
-                )
-              )}
-              {!isStreaming && suggestions.length > 0 && !proactiveBudgetSpent ? (
+              {groupedMessages.map((msg, index) => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  isLastAssistant={
+                    msg.role === "assistant" && index === groupedMessages.length - 1
+                  }
+                  isStreaming={isStreaming}
+                  branding={branding}
+                  theme={theme}
+                  onToolOptionSelect={onToolOptionSelect}
+                  selectedProductKeys={selectedProductKeys}
+                  favouriteProductKeys={favouriteProductKeys}
+                  onToggleCompareSelection={onToggleCompareSelection}
+                  onToggleFavourite={onToggleFavourite}
+                />
+              ))}
+              {!isStreaming &&
+              suggestions.length > 0 &&
+              (!proactiveBudgetSpent || showProactiveSuggestions) ? (
                 <NextQuestionSuggestions
                   suggestions={suggestions}
                   onSelect={onSuggestionSelect}
