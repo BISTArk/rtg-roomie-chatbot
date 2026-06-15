@@ -1,5 +1,19 @@
 import type { ProductCard } from "@/lib/product-types";
 
+function normalizePriceValue(value?: string | null): string {
+  return String(value || "")
+    .trim()
+    .replace(/^\$+/, "");
+}
+
+export function formatProductPrice(product: ProductCard): string {
+  const salePrice = normalizePriceValue(product.salePrice);
+  const regularPrice = normalizePriceValue(product.regularPrice);
+  if (salePrice) return `$${salePrice}`;
+  if (regularPrice) return `$${regularPrice}`;
+  return "Price unavailable";
+}
+
 export function openProductLink(product: ProductCard) {
   if (!product.link || typeof window === "undefined") return;
 
@@ -49,10 +63,4 @@ export function addProductToCart(product: ProductCard) {
   }
 
   openProductLink(product);
-}
-
-export function formatProductPrice(product: ProductCard): string {
-  if (product.salePrice) return `$${product.salePrice}`;
-  if (product.regularPrice) return `$${product.regularPrice}`;
-  return "Price unavailable";
 }

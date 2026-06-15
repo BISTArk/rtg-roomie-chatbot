@@ -56,7 +56,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { addProductToCart, openProductLink } from "@/lib/product-actions";
+import { addProductToCart, formatProductPrice, openProductLink } from "@/lib/product-actions";
 import type {
   ProductCard,
   SelectableProductCard,
@@ -478,11 +478,7 @@ function ProductSearchTool({
         const productKey = product.sku || product.title || `${index}`;
         const isSelected = selectedProductKeys.includes(productKey);
         const isFavourited = favouriteProductKeys.includes(productKey);
-        const price = product.salePrice
-          ? `$${product.salePrice}`
-          : product.regularPrice
-            ? `$${product.regularPrice}`
-            : "Price unavailable";
+        const price = formatProductPrice(product);
 
         return (
           <Card

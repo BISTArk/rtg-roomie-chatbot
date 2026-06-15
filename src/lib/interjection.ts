@@ -3,6 +3,7 @@ import type { BrowsingHistoryEntry, PageContext } from "@/lib/system-prompt";
 import { detectStageFromResponse, stripStageTag } from "@/lib/stage-tag";
 
 export const INTERJECTION_MESSAGE_ID_PREFIX = "interjection-";
+export const COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX = "proactive-";
 
 const TRANSIENT_STAGES = new Set([
   "new-session",
@@ -65,11 +66,52 @@ export function isTransientProactiveMessage(message: UIMessage): boolean {
 }
 
 function promoteCommittedAssistantId(messageId: string): string {
+  if (messageId.includes(COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX)) {
+    return messageId;
+  }
+
   if (messageId.includes(INTERJECTION_MESSAGE_ID_PREFIX)) {
     const suffix = messageId.slice(INTERJECTION_MESSAGE_ID_PREFIX.length).trim();
-    return suffix ? `assistant-${suffix}` : `assistant-${Date.now()}`;
+    return suffix
+      ? `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${suffix}`
+      : `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${Date.now()}`;
   }
-  return messageId;
+
+  return `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${messageId}`;
+}
+
+function isCommittedProactiveMessage(message: UIMessage): boolean {
+  return message.id.includes(COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX);
+}
+
+function isNonMergeableProactiveMessage(message: UIMessage): boolean {
+  return isTransientProactiveMessage(message) || isCommittedProactiveMessage(message);
+}
+
+function splitTextPartByTransientStage(
+  part: { type: "text"; text: string }
+): Array<{ parts: UIMessage["parts"]; stage: string | null }> {
+  const match = part.text.match(
+    /\[STAGE:\s*(new-session|interjection|contextual|reengagement|upsell)\s*\]/i
+  );
+
+  if (!match || match.index == null) {
+    return [{ parts: [part], stage: null }];
+  }
+
+  const stage = match[1].toLowerCase();
+  const before = part.text.slice(0, match.index).trim();
+  const after = part.text.slice(match.index).trim();
+  const segments: Array<{ parts: UIMessage["parts"]; stage: string | null }> = [];
+
+  if (before) {
+    segments.push({ parts: [{ type: "text", text: before }], stage: null });
+  }
+  if (after) {
+    segments.push({ parts: [{ type: "text", text: after }], stage });
+  }
+
+  return segments.length > 0 ? segments : [{ parts: [part], stage: null }];
 }
 
 /** Keep proactive peek messages in chat history once the shopper engages. */
@@ -97,7 +139,7 @@ export function commitTransientProactiveMessages(messages: UIMessage[]): UIMessa
 function isTransientAssistantMessage(message: UIMessage): boolean {
   if (message.role !== "assistant") return false;
   if (message.id === "welcome") return true;
-  if (message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX)) return true;
+  if (isNonMergeableProactiveMessage(message)) return true;
   return getTextParts(message).some(
     (part) => getTransientStageFromText(part.text) != null
   );
@@ -105,7 +147,7 @@ function isTransientAssistantMessage(message: UIMessage): boolean {
 
 export function shouldMergeAssistantMessages(previous: UIMessage, message: UIMessage) {
   if (message.role !== "assistant" || previous.role !== "assistant") return false;
-  if (isTransientAssistantMessage(previous) || isTransientAssistantMessage(message)) {
+  if (isNonMergeableProactiveMessage(previous) || isNonMergeableProactiveMessage(message)) {
     return false;
   }
   return true;
@@ -125,15 +167,20 @@ export function splitTransientAssistantMessages(messages: UIMessage[]): UIMessag
 
     for (const part of message.parts) {
       if (part.type === "text") {
-        const stage = getTransientStageFromText(part.text);
-        if (stage) {
-          if (currentParts.length > 0) {
-            segments.push({ parts: currentParts, stage: null });
-            currentParts = [];
+        const textSegments = splitTextPartByTransientStage(part);
+        for (const segment of textSegments) {
+          if (segment.stage) {
+            if (currentParts.length > 0) {
+              segments.push({ parts: currentParts, stage: null });
+              currentParts = [];
+            }
+            segments.push(segment);
+            continue;
           }
-          segments.push({ parts: [part], stage });
-          continue;
+
+          currentParts.push(...segment.parts);
         }
+        continue;
       }
 
       currentParts.push(part);
@@ -163,9 +210,11 @@ export function splitTransientAssistantMessages(messages: UIMessage[]): UIMessag
       const id =
         segment.stage === "interjection"
           ? createInterjectionMessageId(`${message.id}-${index}`)
-          : index === 0
-            ? message.id
-            : `${message.id}-segment-${index}`;
+          : segment.stage
+            ? `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${message.id}-${index}`
+            : index === 0
+              ? message.id
+              : `${message.id}-segment-${index}`;
 
       split.push({
         ...message,
