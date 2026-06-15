@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 import type { BrowsingHistoryEntry, PageContext } from "@/lib/system-prompt";
-import { detectStageFromResponse } from "@/lib/stage-tag";
+import { detectStageFromResponse, stripStageTag } from "@/lib/stage-tag";
 
 export const INTERJECTION_MESSAGE_ID_PREFIX = "interjection-";
 
@@ -62,6 +62,36 @@ export function isTransientProactiveMessage(message: UIMessage): boolean {
   return getTextParts(message).some(
     (part) => getTransientStageFromText(part.text) != null
   );
+}
+
+function promoteCommittedAssistantId(messageId: string): string {
+  if (messageId.includes(INTERJECTION_MESSAGE_ID_PREFIX)) {
+    const suffix = messageId.slice(INTERJECTION_MESSAGE_ID_PREFIX.length).trim();
+    return suffix ? `assistant-${suffix}` : `assistant-${Date.now()}`;
+  }
+  return messageId;
+}
+
+/** Keep proactive peek messages in chat history once the shopper engages. */
+export function commitTransientProactiveMessages(messages: UIMessage[]): UIMessage[] {
+  let changed = false;
+
+  const next = messages.map((message) => {
+    if (!isTransientProactiveMessage(message)) return message;
+
+    changed = true;
+    return {
+      ...message,
+      id: promoteCommittedAssistantId(message.id),
+      parts: message.parts.map((part) =>
+        part.type === "text"
+          ? { ...part, text: stripStageTag(part.text).trim() }
+          : part
+      ),
+    };
+  });
+
+  return changed ? next : messages;
 }
 
 function isTransientAssistantMessage(message: UIMessage): boolean {

@@ -11,6 +11,7 @@ import {
 } from "ai";
 import { ArrowRightLeft, X } from "lucide-react";
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { ChatHeader } from "./ChatHeader";
 import { ChatFavourites } from "./ChatFavourites";
 import { ChatHistory } from "./ChatHistory";
@@ -73,6 +74,7 @@ import {
   type ParsedAssistantMarkup,
 } from "@/lib/assistant-html";
 import {
+  commitTransientProactiveMessages,
   createInterjectionMessageId,
   dismissInterjection,
   INTERJECTION_DISMISSED_KEY,
@@ -1719,10 +1721,15 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     (prompt: string) => {
       setShowInterjection(false);
       setInterjectionContent(null);
-      setMessages((prev) =>
-        prev.filter((message) => !isTransientProactiveMessage(message))
-      );
-      setIsOpen(true);
+
+      const committed = commitTransientProactiveMessages(messagesRef.current);
+      messagesRef.current = committed;
+
+      flushSync(() => {
+        setMessages(committed);
+        setIsOpen(true);
+      });
+
       void handleSend(prompt);
     },
     [handleSend, setMessages]
