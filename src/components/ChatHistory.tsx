@@ -30,10 +30,17 @@ function SessionItem({
   onDelete: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`group flex w-full flex-col gap-1 rounded-xl border px-3 py-3 text-left transition-colors ${
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`group flex w-full cursor-pointer flex-col gap-1 rounded-xl border px-3 py-3 text-left transition-colors ${
         isActive
           ? "border-[var(--widget-accent)]/20 bg-[var(--widget-accent)]/10"
           : "border-transparent hover:bg-[var(--widget-surface-alt)]"
@@ -77,7 +84,7 @@ function SessionItem({
           {session.previewText}
         </p>
       ) : null}
-    </button>
+    </div>
   );
 }
 

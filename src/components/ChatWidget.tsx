@@ -1106,6 +1106,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       setBootstrapError("");
       setTenantToken(bootstrap.tenantToken);
+      sessionIdRef.current = nextSessionId;
       setSessionId(nextSessionId);
       setSelectedProducts([]);
       if (embed && typeof window !== "undefined" && window.parent !== window) {
@@ -1117,14 +1118,16 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setBrowserSessionId(nextSessionId);
       }
 
+      const restoredMessages =
+        bootstrap.session.messages?.length
+          ? stripUnresolvedToolParts(bootstrap.session.messages.map(chatMessageToUi))
+          : [buildWelcomeUi(brandingRef.current)];
+
       initFromBridge(bootstrap.session.messages || null, embed);
       initProfileFromBridge(bootstrap.session.visitorProfile || null, embed);
       setHumanMode(false);
-      setMessages(
-        bootstrap.session.messages?.length
-          ? bootstrap.session.messages.map(chatMessageToUi)
-          : [buildWelcomeUi(brandingRef.current)]
-      );
+      messagesRef.current = restoredMessages;
+      setMessages(restoredMessages);
       setSuggestions(bootstrap.session.suggestions ?? []);
       setVisitorProfile(bootstrap.session.visitorProfile || recordVisit({
         productName: pageContextRef.current?.productName,
@@ -1145,15 +1148,19 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       try {
         if (loaded && sessionIdRef.current) {
-          await syncSessionToDb({
-            tenantKey: tenantKeyRef.current,
-            tenantToken: tenantTokenRef.current,
-            sessionId: sessionIdRef.current,
-            hostOrigin: hostOriginRef.current,
-            messages: messages.map(uiMessageToChatMessage),
-            visitorProfile: visitorProfileRef.current,
-            suggestions: suggestionsRef.current,
-          });
+          try {
+            await syncSessionToDb({
+              tenantKey: tenantKeyRef.current,
+              tenantToken: tenantTokenRef.current,
+              sessionId: sessionIdRef.current,
+              hostOrigin: hostOriginRef.current,
+              messages: messagesRef.current.map(uiMessageToChatMessage),
+              visitorProfile: visitorProfileRef.current,
+              suggestions: suggestionsRef.current,
+            });
+          } catch (syncError) {
+            console.error("[widget] failed to sync session before history switch:", syncError);
+          }
         }
         await restoreSession(nextSessionId);
         closeHistory();
@@ -1161,7 +1168,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         console.error("[widget] failed to restore session:", error);
       }
     },
-    [closeHistory, loaded, messages, restoreSession]
+    [closeHistory, loaded, restoreSession]
   );
 
   const handleDeleteHistorySession = useCallback(
