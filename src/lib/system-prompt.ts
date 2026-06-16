@@ -91,21 +91,17 @@ export function getDefaultSkillPrompt(stage: ConversationStage): string {
   return loadFile(`skills/${stage}.md`);
 }
 
+/** Lightweight safety net: strip any stray fenced HTML blocks that may
+ *  have survived the source-file cleanup. The skill files now use
+ *  tool-based instructions, but this catches edge cases where a raw
+ *  ```html block appears in a prompt override. */
 function stripLegacyHtmlInstructions(prompt: string): string {
   return prompt
-    .replace(/```html[\s\S]*?```/gi, "\n(Use the available UI tools instead of HTML.)\n")
+    .replace(/```html[\s\S]*?```/gi, "")
     .replace(
       /\(three backticks\)html[\s\S]*?\(three backticks\)/gi,
-      "\n(Use the available UI tools instead of HTML.)\n"
-    )
-    .replace(/\bHTML\s+(tiles?|blocks?|cards?|code|output)\b/gi, "tool UI")
-    .replace(/\bfenced HTML\b/gi, "tool UI")
-    .replace(/\bsendPrompt\([^)]*\)/g, "a normal follow-up prompt")
-    .replace(/\baddToCart\([^)]*\)/g, "the product card action")
-    .replace(/\bcheckout\(\)/g, "checkout")
-    .replace(/\b\.pill\b/g, "quick option")
-    .replace(/\b\.chip\b/g, "quick option")
-    .replace(/\b\.card\b/g, "product card");
+      ""
+    );
 }
 
 /**

@@ -8,7 +8,7 @@ The system passes an **interjection type** (compare / inform / guide / social / 
 
 Output **prose only** — 1 short sentence (≤20 words) matching the sub-template's intent, then the stage tag.
 
-Do **not** output HTML, fenced code blocks, pills, chips, or buttons. Follow-up actions are generated separately as suggestion chips.
+Do **not** output HTML, fenced code blocks, pills, chips, or buttons. Use natural prose only — the customer will reply naturally.
 
 ## Universal Rules
 
@@ -87,7 +87,7 @@ Still weighing the **Beautyrest Harmony**? I'm here whenever you're ready to dec
 - ❌ Showing full product cards — no images, no price blocks
 - ❌ Asking multiple questions in prose
 - ❌ Using > 30 words of prose
-- ❌ Outputting HTML, pills, chips, or fenced code blocks
+- ❌ Outputting HTML, pills, chips, or fenced code blocks — use natural prose only
 
 ## Stage Tag
 
