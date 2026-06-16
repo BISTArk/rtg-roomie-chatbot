@@ -21,6 +21,10 @@ uri = "https://rtg-roomie-chatbot.vercel.app/api/shopify/webhooks/compliance"
 topics = ["app/uninstalled"]
 uri = "https://rtg-roomie-chatbot.vercel.app/api/shopify/webhooks/app-uninstalled"
 
+[[webhooks.subscriptions]]
+topics = ["products/create", "products/update", "products/delete"]
+uri = "https://rtg-roomie-chatbot.vercel.app/api/shopify/webhooks/products"
+
 [auth]
 redirect_urls = [ "https://rtg-roomie-chatbot.vercel.app/api/shopify/callback" ]
 

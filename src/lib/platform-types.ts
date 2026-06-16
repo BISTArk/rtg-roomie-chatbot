@@ -121,6 +121,7 @@ export interface CatalogSourceRecord {
   createdAt: string;
   updatedAt: string;
   lastSyncedAt?: string | null;
+  syncRequestedAt?: string | null;
 }
 
 export interface TenantAnalyticsSummary {

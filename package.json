@@ -7,7 +7,9 @@
     "build": "node scripts/prebuild.js && next build",
     "start": "next start",
     "lint": "eslint",
-    "db:schema": "bun --env-file=.env.local --env-file=.env scripts/ensure-schema.ts"
+    "db:schema": "bun --env-file=.env.local --env-file=.env scripts/ensure-schema.ts",
+    "db:push-prompts": "bun --env-file=.env.local --env-file=.env scripts/sync-prompts-to-db.ts",
+    "db:push-prompts:list": "bun --env-file=.env.local --env-file=.env scripts/sync-prompts-to-db.ts --list"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.69",

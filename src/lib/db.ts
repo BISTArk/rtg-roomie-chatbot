@@ -204,6 +204,9 @@ export async function ensurePlatformSchema(): Promise<void> {
           last_synced_at TIMESTAMPTZ
         );
 
+        ALTER TABLE catalog_sources
+          ADD COLUMN IF NOT EXISTS sync_requested_at TIMESTAMPTZ;
+
         CREATE INDEX IF NOT EXISTS idx_catalog_sources_tenant_id
           ON catalog_sources(tenant_id);
 

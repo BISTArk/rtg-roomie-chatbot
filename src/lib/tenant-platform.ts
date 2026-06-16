@@ -2029,6 +2029,7 @@ type CatalogSourceRow = {
   created_at: string;
   updated_at: string;
   last_synced_at: string | null;
+  sync_requested_at: string | null;
 };
 
 function mapCatalogSource(row: CatalogSourceRow): CatalogSourceRecord {
@@ -2041,6 +2042,7 @@ function mapCatalogSource(row: CatalogSourceRow): CatalogSourceRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastSyncedAt: row.last_synced_at,
+    syncRequestedAt: row.sync_requested_at,
   };
 }
 
@@ -2165,6 +2167,49 @@ export async function updateCatalogSourceSyncStamp(sourceId: string): Promise<vo
       `UPDATE catalog_sources SET last_synced_at = NOW(), updated_at = NOW() WHERE id = $1`,
       [sourceId]
     );
+  });
+}
+
+export async function markShopifyCatalogSyncRequested(tenantId: string): Promise<boolean> {
+  if (!hasDatabase()) return false;
+  await ensurePlatformSchema();
+  return withDb(async (client) => {
+    const result = await client.query(
+      `UPDATE catalog_sources
+       SET sync_requested_at = NOW(), updated_at = NOW()
+       WHERE tenant_id = $1 AND source_type = 'shopify'
+       RETURNING id`,
+      [tenantId]
+    );
+    return (result.rowCount ?? 0) > 0;
+  });
+}
+
+export async function shouldRunShopifyCatalogWebhookSync(
+  tenantId: string
+): Promise<boolean> {
+  if (!hasDatabase()) return false;
+  await ensurePlatformSchema();
+  return withDb(async (client) => {
+    const result = await client.query<{
+      sync_requested_at: string | null;
+      last_synced_at: string | null;
+    }>(
+      `SELECT sync_requested_at, last_synced_at
+       FROM catalog_sources
+       WHERE tenant_id = $1 AND source_type = 'shopify'
+       LIMIT 1`,
+      [tenantId]
+    );
+    const row = result.rows[0];
+    if (!row?.sync_requested_at) return false;
+
+    const requestedAt = new Date(row.sync_requested_at).getTime();
+    const lastSyncedAt = row.last_synced_at
+      ? new Date(row.last_synced_at).getTime()
+      : 0;
+
+    return requestedAt > lastSyncedAt;
   });
 }
 
