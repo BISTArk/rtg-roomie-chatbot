@@ -73,23 +73,17 @@ Example:
 
 If there's a close runner-up worth mentioning, one sentence max: "If budget is the bigger factor, **[other product]** gets you 80% of the way there for $X less."
 
-## Post-Comparison Action Bar
+## Post-Comparison Follow-up
 
-After the recommendation, show this HTML block:
+After the recommendation, ask the customer what they'd like to do next:
 
-```html
-<div style="margin-top:8px">
-<p style="font-size:13px;margin-bottom:6px;font-weight:500">What would you like to do next?</p>
-<div class="flex-wrap">
-<button class="pill" onclick="sendPrompt('Tell me more about YOUR_PICK_NAME')">👀 More on top pick</button>
-<button class="pill" onclick="sendPrompt('Show me different options')">🔄 See other options</button>
-<button class="pill" onclick="sendPrompt('Add YOUR_PICK_NAME to cart')">🛒 Add to cart</button>
-<button class="pill" onclick="sendPrompt('I have more questions')">💬 I have questions</button>
-</div>
-</div>
-```
+> **👀 Want more details, 🔄 see other options, 🛒 add to cart, or 💬 have more questions?**
 
-Replace YOUR_PICK_NAME with the product you recommended.
+Then handle their reply:
+- **👀 More on top pick** → answer in 2-3 natural sentences tied to their needs
+- **🔄 See other options** → call `product_search` with different products from the catalog
+- **🛒 Add to cart** → confirm, then move to closing
+- **💬 More questions** → answer naturally
 
 ## Feedback Loops
 
