@@ -23,7 +23,10 @@ const productCardSchema = z.object({
   image: z.string().optional(),
   link: z.string().optional(),
   sku: z.string().optional(),
-  summary: z.string().max(240).optional(),
+  summary: z
+    .string()
+    .optional()
+    .describe("A short and concise summary of why this product is being recommended."),
   shopifyVariantId: z.string().optional(),
 });
 
