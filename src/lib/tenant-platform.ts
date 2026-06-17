@@ -18,7 +18,6 @@ import type {
   TenantAnalyticsSummary,
   TenantBootstrap,
   TenantPromptConfig,
-  TenantPromptStage,
   TenantRecord,
   TenantRuntimeConfig,
   TenantSkillPrompts,
@@ -29,7 +28,9 @@ import type {
 import type { PersistedChatMessage, SharedChatMessage } from "@/lib/chat-types";
 import type { VisitorProfile } from "@/lib/visitor-profile";
 import { formatRetrievedCatalog, queryFullCatalog } from "@/lib/catalog-retrieval";
-import { getDefaultSkillPrompt, getDefaultSystemPrompt } from "@/lib/system-prompt";
+import { SKILLS_RAW } from "@/data/skills-raw";
+import { getDefaultSkillRegistry } from "@/lib/skills";
+import { getDefaultSystemPrompt } from "@/lib/system-prompt";
 import {
   deleteAiSdkSessionHistory,
   ensureSessionRecord,
@@ -40,25 +41,14 @@ import {
 
 const DEFAULT_TENANT_KEY = "shop-assist-demo";
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const PROMPT_STAGES: TenantPromptStage[] = [
-  "returning",
-  "greeting",
-  "discovery",
-  "recommendation",
-  "comparison",
-  "closing",
-  "reengagement",
-  "contextual",
-  "new-session",
-  "interjection",
-  "upsell",
-  "complaint",
-];
 const DEFAULT_SEEDED_SYSTEM_PROMPT = getDefaultSystemPrompt();
-const DEFAULT_SEEDED_SKILL_PROMPTS = PROMPT_STAGES.reduce<TenantSkillPrompts>((accumulator, stage) => {
-  accumulator[stage] = getDefaultSkillPrompt(stage);
-  return accumulator;
-}, {});
+const DEFAULT_SEEDED_SKILL_PROMPTS = getDefaultSkillRegistry().reduce<TenantSkillPrompts>(
+  (accumulator, skill) => {
+    accumulator[skill.name] = SKILLS_RAW[skill.name] || "";
+    return accumulator;
+  },
+  {}
+);
 
 const FALLBACK_TENANT: TenantRecord = {
   tenantId: "tenant_local_shop_assist",
@@ -264,9 +254,12 @@ function appendTenantAndDateFilters(input: {
 
 function buildSeededSkillPrompts(skillPrompts?: TenantSkillPrompts | null): TenantSkillPrompts {
   const current = skillPrompts ?? {};
-  return PROMPT_STAGES.reduce<TenantSkillPrompts>((accumulator, stage) => {
-    const value = current[stage];
-    accumulator[stage] = typeof value === "string" && value.trim() ? value.trim() : DEFAULT_SEEDED_SKILL_PROMPTS[stage] || "";
+  return getDefaultSkillRegistry().reduce<TenantSkillPrompts>((accumulator, skill) => {
+    const value = current[skill.name];
+    accumulator[skill.name] =
+      typeof value === "string" && value.trim()
+        ? value.trim()
+        : DEFAULT_SEEDED_SKILL_PROMPTS[skill.name] || "";
     return accumulator;
   }, {});
 }

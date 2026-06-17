@@ -1,21 +1,7 @@
 import { isAdminAuthenticated } from "@/lib/admin-auth";
-import type { TenantPromptStage, TenantSkillPrompts } from "@/lib/platform-types";
+import type { TenantSkillPrompts } from "@/lib/platform-types";
+import { getDefaultSkillRegistry } from "@/lib/skills";
 import { updateTenantConfig } from "@/lib/tenant-platform";
-
-const PROMPT_STAGES: TenantPromptStage[] = [
-  "returning",
-  "greeting",
-  "discovery",
-  "recommendation",
-  "comparison",
-  "closing",
-  "reengagement",
-  "contextual",
-  "new-session",
-  "interjection",
-  "upsell",
-  "complaint",
-];
 
 function readOptionalText(formData: FormData, name: string): string | undefined {
   const value = String(formData.get(name) || "").trim();
@@ -36,8 +22,8 @@ export async function POST(
 
   const { tenantId } = await params;
   const formData = await request.formData();
-  const skillPrompts = PROMPT_STAGES.reduce<TenantSkillPrompts>((accumulator, stage) => {
-    accumulator[stage] = readPromptText(formData, `skill:${stage}`);
+  const skillPrompts = getDefaultSkillRegistry().reduce<TenantSkillPrompts>((accumulator, skill) => {
+    accumulator[skill.name] = readPromptText(formData, `skill:${skill.name}`);
     return accumulator;
   }, {});
 

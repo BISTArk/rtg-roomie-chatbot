@@ -26,9 +26,7 @@ import {
   isInterjectionMessage,
   isNewSessionMessage,
   shouldMergeAssistantMessages,
-  splitTransientAssistantMessages,
 } from "@/lib/interjection";
-import { stripStageTag } from "@/lib/stage-tag";
 import type { WidgetBranding, WidgetTheme } from "@/lib/widget-config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -827,6 +825,8 @@ function MessageBubble({
     let currentParts: UIMessage["parts"] = [];
 
     for (const [index, part] of message.parts.entries()) {
+      if (part.type === "tool-load_skill") continue;
+
       if (part.type === "tool-ask_user_question") {
         if (currentParts.some(isRenderableAssistantBubblePart)) {
           assistantBlocks.push({ type: "bubble", parts: currentParts });
@@ -842,6 +842,10 @@ function MessageBubble({
     if (currentParts.some(isRenderableAssistantBubblePart)) {
       assistantBlocks.push({ type: "bubble", parts: currentParts });
     }
+  }
+
+  if (!isUser && assistantBlocks.length === 0) {
+    return null;
   }
 
   return (
@@ -930,7 +934,7 @@ function FormattedMessage({
   text: string;
   isStreaming: boolean;
 }) {
-  const content = cleanTextSegment(stripStageTag(text));
+  const content = cleanTextSegment(text);
   if (!content) return null;
 
   return (
@@ -1006,9 +1010,7 @@ export function ChatMessages({
   onToggleCompareSelection: (product: SelectableProductCard) => void;
   onToggleFavourite: (product: SelectableProductCard) => void;
 }) {
-  const displayMessages = splitTransientAssistantMessages(
-    messages.filter((message) => message.id !== "welcome")
-  );
+  const displayMessages = messages.filter((message) => message.id !== "welcome");
   const groupedMessages = displayMessages.reduce<UIMessage[]>((groups, message) => {
     const previous = groups[groups.length - 1];
     if (previous && shouldMergeAssistantMessages(previous, message)) {

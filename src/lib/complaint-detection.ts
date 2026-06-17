@@ -3,15 +3,13 @@
  *
  * We detect complaint signals in user messages so we can IMMEDIATELY suppress
  * all proactive triggers (upsell / interjection / contextual / re-engagement)
- * even before the server has a chance to respond with `[STAGE:complaint]`.
+ * even before the server has a chance to load the complaint skill.
  *
  * This is a best-effort pattern-match — the authoritative complaint handling
- * is in skills/complaint.md, driven by the AI via the stage tag. The
- * detection here is purely defensive: ensure no proactive message fires on
- * top of a customer who just said "I want to return this."
+ * is in the complaint skill, loaded via `load_skill`. The detection here is
+ * purely defensive: ensure no proactive message fires on top of a customer
+ * who just said "I want to return this."
  */
-
-import { detectStageFromResponse } from "./stage-tag";
 
 /** Patterns that signal a customer is complaining, returning, or upset. */
 const COMPLAINT_PATTERNS: ReadonlyArray<RegExp> = [
@@ -71,7 +69,6 @@ export function isComplaintMessage(text: string): boolean {
  *
  * Rules:
  *  - If the most recent user message matches a complaint pattern → true
- *  - If the most recent assistant message has `[STAGE:complaint]` tag → true
  *  - Otherwise → false
  *
  * The consumer (ChatWidget's gatedFire) uses this to suppress proactive
@@ -83,39 +80,11 @@ export function isInComplaintMode(
 ): boolean {
   if (!messages || messages.length === 0) return false;
 
-  // Walk backwards — most-recent first
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg.role === "user") {
-      // Complaint signals in the user's latest message override everything
-      if (isComplaintMessage(msg.text)) return true;
-      // If the last user message is NOT a complaint and there's no newer
-      // assistant message in complaint stage, we're not in complaint mode.
-      // (They may have moved on to a shopping question.)
-      // Continue scanning backwards in case we already tagged a recent
-      // assistant response as complaint and the user hasn't replied yet.
-      continue;
-    }
-    if (msg.role === "assistant") {
-      const stage = detectStageFromResponse(msg.text);
-      if (stage === "complaint") return true;
-      // If we hit a non-complaint persistent assistant stage before finding
-      // evidence of complaint mode, we're not in it. Transient stages
-      // (contextual / reengagement / interjection / new-session / upsell)
-      // don't clear complaint mode — they can fire within complaint mode
-      // and get suppressed; the persistent chat stages DO clear it.
-      if (
-        stage &&
-        stage !== "contextual" &&
-        stage !== "reengagement" &&
-        stage !== "interjection" &&
-        stage !== "new-session" &&
-        stage !== "upsell"
-      ) {
-        return false;
-      }
-      continue;
-    }
+    if (msg.role !== "user") continue;
+    return isComplaintMessage(msg.text);
   }
+
   return false;
 }

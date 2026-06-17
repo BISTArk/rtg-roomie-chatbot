@@ -31,7 +31,6 @@ import {
   recordPrivacyAcceptance,
   restorePrivacyAcceptanceFromBridge,
 } from "@/lib/privacy-consent";
-import { stripStageTag } from "@/lib/stage-tag";
 import {
   type VisitorProfile,
   recordVisit,
@@ -74,20 +73,21 @@ import {
   toggleFavouriteInList,
   type FavouriteProduct,
 } from "@/lib/favourites-storage";
+import { fetchSuggestions } from "@/lib/chat-suggestions";
+import { getProactiveSuggestionFallbacks } from "@/lib/suggestions";
 import {
-  fetchSuggestions,
-  getProactiveSuggestionFallbacks,
-} from "@/lib/chat-suggestions";
-import {
-  commitTransientProactiveMessages,
+  createContextualMessageId,
   createInterjectionMessageId,
-  createProactiveMessageId,
+  createNewSessionMessageId,
+  createReengagementMessageId,
+  createUpsellMessageId,
   dismissInterjection,
+  getAssistantMessageText,
   INTERJECTION_DISMISSED_KEY,
+  isContextualMessage,
   isInterjectionDismissed,
+  isNewSessionMessage,
   isTransientProactiveMessage,
-  messageHasContextualStage,
-  messageHasNewSessionStage,
   messageNeedsPeekSuggestions,
   pickInterjectionType,
   STANDALONE_INTERJECTION_DELAY_MS,
@@ -167,7 +167,7 @@ function uiMessageToChatMessage(m: UIMessage): ChatMessage {
   return {
     id: m.id,
     role: m.role as "user" | "assistant",
-    text: stripStageTag(getTextFromUIMessage(m)),
+    text: getAssistantMessageText(m),
     parts: m.parts,
   };
 }
@@ -301,7 +301,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [loaded, setLoaded] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string>("");
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
-  const selectedModel = "gpt-5.4-mini";
+  const selectedModel = "gpt-5.5";
   const initialTenantKey = getRuntimeTenantKey();
   const [widgetConfig, setWidgetConfig] = useState(() =>
     resolveWidgetConfig(getWindowChatConfig())
@@ -1244,7 +1244,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       let suggestionsForPeek = proactiveSuggestions
         .map((entry) => String(entry || "").trim())
         .filter(Boolean);
-      const prose = stripStageTag(getTextFromUIMessage(message)).trim();
+      const prose = getAssistantMessageText(message);
 
       if (!prose) {
         return;
@@ -1252,7 +1252,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       if (suggestionsForPeek.length === 0 && messageNeedsPeekSuggestions(message)) {
         suggestionsForPeek =
-          messageHasNewSessionStage(message)
+          isNewSessionMessage(message)
             ? getProactiveSuggestionFallbacks("new-session")
             : getProactiveSuggestionFallbacks(
                 "interjection",
@@ -1299,7 +1299,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const presentContextualProactiveMessage = useCallback((message: UIMessage) => {
     const storedMessage: UIMessage = {
       ...message,
-      id: createProactiveMessageId(message.id),
+      id: createContextualMessageId(message.id),
     };
 
     const nextMessages = [
@@ -1313,7 +1313,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       recordProactiveAttempt();
     }
 
-    const prose = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+    const prose = getAssistantMessageText(storedMessage);
     if (prose && !isOpenRef.current) {
       setInterjectionContent({ prose });
       setShowInterjection(true);
@@ -1326,13 +1326,12 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
   const loadProactiveSuggestions = useCallback(
     async (candidateMessages: UIMessage[], context: SuggestionsContext): Promise<string[]> => {
-      const assistantMessage = stripStageTag(
-        getTextFromUIMessage(candidateMessages[candidateMessages.length - 1] || {
-          id: "",
-          role: "assistant",
-          parts: [],
-        })
-      ).trim();
+      const lastMessage = candidateMessages[candidateMessages.length - 1] || {
+        id: "",
+        role: "assistant" as const,
+        parts: [],
+      };
+      const assistantMessage = getAssistantMessageText(lastMessage);
       const requestContext: SuggestionsContext = {
         ...context,
         assistantMessage: assistantMessage || context.assistantMessage,
@@ -1375,10 +1374,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
   const resolvePeekSuggestionContext = useCallback(
     (message: UIMessage): SuggestionsContext => {
-      if (messageHasNewSessionStage(message)) {
+      if (isNewSessionMessage(message)) {
         return {
           mode: "new-session",
-          assistantMessage: stripStageTag(getTextFromUIMessage(message)).trim(),
+          assistantMessage: getAssistantMessageText(message),
         };
       }
 
@@ -1389,7 +1388,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           messages: messagesRef.current,
           browsingHistory: browsingHistoryRef.current,
         }),
-        assistantMessage: stripStageTag(getTextFromUIMessage(message)).trim(),
+        assistantMessage: getAssistantMessageText(message),
       };
     },
     []
@@ -1403,7 +1402,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       .find(isTransientProactiveMessage);
     if (!lastTransient) return;
 
-    const prose = stripStageTag(getTextFromUIMessage(lastTransient)).trim();
+    const prose = getAssistantMessageText(lastTransient);
     if (!prose) return;
 
     if (messageNeedsPeekSuggestions(lastTransient)) {
@@ -1437,7 +1436,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       return;
     }
 
-    if (messageHasContextualStage(lastTransient)) {
+    if (isContextualMessage(lastTransient)) {
       setInterjectionContent({ prose });
       setShowInterjection(true);
     }
@@ -1449,8 +1448,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, [loaded, isOpen, messages, restoreProactivePeekBubble]);
 
   const consumeAssistantStream = useCallback(
-    async (stream: ReadableStream<UIMessageChunk>) => {
-      const assistantId = generateId();
+    async (
+      stream: ReadableStream<UIMessageChunk>,
+      options?: { messageId?: string }
+    ) => {
+      const assistantId = options?.messageId ?? generateId();
       let latestMessage: UIMessage | null = null;
       try {
         for await (const uiMessage of readUIMessageStream({ stream })) {
@@ -1590,7 +1592,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         messages: messages,
         abortSignal: new AbortController().signal,
       });
-      await consumeAssistantStream(chunkStream);
+      await consumeAssistantStream(chunkStream, {
+        messageId: createReengagementMessageId(),
+      });
       const proactiveSuggestions = await loadProactiveSuggestions(messagesRef.current, {
         mode: "reengagement",
       });
@@ -1631,7 +1635,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         ...messagesRef.current.filter((entry) => !isTransientProactiveMessage(entry)),
         storedMessage,
       ];
-      const prose = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+      const prose = getAssistantMessageText(storedMessage);
       if (!prose) return;
 
       const interjectionSuggestions = await loadProactiveSuggestions(candidateMessages, {
@@ -1673,7 +1677,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         messages: messages,
         abortSignal: new AbortController().signal,
       });
-      await consumeAssistantStream(chunkStream);
+      await consumeAssistantStream(chunkStream, {
+        messageId: createUpsellMessageId(),
+      });
       const proactiveSuggestions = await loadProactiveSuggestions(messagesRef.current, {
         mode: "upsell",
         pageContext: pageContextRef.current ?? undefined,
@@ -1724,13 +1730,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       const storedMessage: UIMessage = {
         ...greeting,
-        id: createProactiveMessageId(greeting.id),
+        id: createNewSessionMessageId(greeting.id),
       };
       const candidateMessages = [
         ...messagesRef.current.filter((entry) => !isTransientProactiveMessage(entry)),
         storedMessage,
       ];
-      const prose = stripStageTag(getTextFromUIMessage(storedMessage)).trim();
+      const prose = getAssistantMessageText(storedMessage);
       if (!prose) return;
 
       const greetingSuggestions = await loadProactiveSuggestions(candidateMessages, {
@@ -1930,12 +1936,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         setMessages(cleaned);
       }
 
-      const committed = commitTransientProactiveMessages(messagesRef.current);
-      if (committed !== messagesRef.current) {
-        messagesRef.current = committed;
-        setMessages(committed);
-        proactivePeekRef.current = null;
-      }
+      proactivePeekRef.current = null;
 
       // User typing = CONVERSATION mode. Reset all proactive timers/counters.
       const now = Date.now();
@@ -1988,17 +1989,13 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       setInterjectionContent(null);
       proactivePeekRef.current = null;
 
-      const committed = commitTransientProactiveMessages(messagesRef.current);
-      messagesRef.current = committed;
-
       flushSync(() => {
-        setMessages(committed);
         setIsOpen(true);
       });
 
       void handleSend(prompt);
     },
-    [handleSend, setMessages]
+    [handleSend]
   );
 
   const toggleCompareSelection = useCallback((product: ProductCard) => {

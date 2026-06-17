@@ -14,26 +14,23 @@ import {
   type VisitorProfile,
   type PageContext,
   type BrowsingHistoryEntry,
-  type ConversationStage,
   type CustomerLocation,
 } from "@/lib/system-prompt";
 import {
   buildCatalogPlaceholder,
-  formatRetrievedCatalog,
-  getLastUserText,
-  needsCatalogRetrieval,
-  planCatalogIntent,
-  queryCatalogFromRows,
-  resolveCatalogMode,
 } from "@/lib/catalog-retrieval";
-import { inferStage, stripStageTag } from "@/lib/stage-tag";
 import { stripUnresolvedToolParts } from "@/lib/message-tools";
 import { isComplaintMessage } from "@/lib/complaint-detection";
 import { getWelcomeMessage } from "@/lib/widget-config";
 import type { WidgetBranding } from "@/lib/widget-config";
 import { buildTenantCatalogContext, getActiveCatalogDataset, recordConversationAnalytics, resolveTenantFromToken } from "@/lib/tenant-platform";
 import { isPgDeadlockError } from "@/lib/db";
-import { chatTools } from "@/tools";
+import { createChatTools } from "@/tools";
+import {
+  DEFAULT_MODEL,
+  MODEL_MAP,
+} from "@/lib/models";
+import type { CatalogDataset, TenantSkillPrompts } from "@/lib/platform-types";
 
 export const maxDuration = 60;
 
@@ -58,15 +55,48 @@ type ChatRequestBody = {
   hostOrigin?: string;
 };
 
-const MODEL_MAP: Record<string, string> = {
-  "gpt-5.4-mini": "openai/gpt-5.4-mini",
-  "gemini-flash-3": "google/gemini-3-flash-preview",
-  "claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
-  "gpt-5.4": "openai/gpt-5.4",
-};
+const CATALOG_AGENT_NOTE =
+  "The full product catalog is not injected into this prompt. Use the product_search tool to retrieve matching products from the full store catalog.";
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
-const NO_ACTIVE_TENANT_CATALOG_MARKER = "(no active tenant catalog snapshot)";
+function buildConversationContext(
+  messages: Array<{ role: "user" | "assistant"; text: string }>
+): string {
+  return messages
+    .slice(-8)
+    .map((message) => `${message.role}: ${message.text}`)
+    .join("\n");
+}
+
+function buildPageContextSummary(pageContext?: PageContext): string {
+  if (!pageContext) return "";
+
+  const parts = [
+    pageContext.page ? `Page: ${pageContext.page}` : "",
+    pageContext.productName ? `Product: ${pageContext.productName}` : "",
+    pageContext.productPrice ? `Price: ${pageContext.productPrice}` : "",
+    pageContext.category ? `Category: ${pageContext.category}` : "",
+    pageContext.searchQuery ? `Search: ${pageContext.searchQuery}` : "",
+    pageContext.cartItems?.length
+      ? `Cart: ${pageContext.cartItems.join("; ")}`
+      : "",
+  ].filter(Boolean);
+
+  return parts.join("\n");
+}
+
+function createRequestChatTools(input: {
+  catalogDataset: CatalogDataset | null;
+  skillPrompts: TenantSkillPrompts;
+  plainMessages: Array<{ role: "user" | "assistant"; text: string }>;
+  pageContext?: PageContext;
+}) {
+  return createChatTools({
+    catalogDataset: input.catalogDataset,
+    skillPrompts: input.skillPrompts,
+    conversationContext: buildConversationContext(input.plainMessages),
+    pageContextSummary: buildPageContextSummary(input.pageContext),
+  });
+}
 
 function getTextFromUiMessage(m: UIMessage): string {
   return m.parts
@@ -108,13 +138,7 @@ function sanitizeForModel(
     .map((m) => {
       const { id, ...rest } = m;
       void id;
-      if (m.role !== "assistant") return rest as Omit<UIMessage, "id">;
-      return {
-        ...rest,
-        parts: rest.parts.map((p) =>
-          p.type === "text" ? { ...p, text: stripStageTag(p.text) } : p
-        ),
-      } as Omit<UIMessage, "id">;
+      return rest as Omit<UIMessage, "id">;
     });
 
   // If the static welcome was in the messages, inject it as a synthetic
@@ -143,23 +167,23 @@ function sanitizeForModel(
 function toPlainMessages(messages: UIMessage[]): Array<{ role: "user" | "assistant"; text: string }> {
   return messages.map((message) => ({
     role: message.role as "user" | "assistant",
-    text: stripStageTag(getTextFromUiMessage(message)),
+    text: getTextFromUiMessage(message),
   }));
 }
 
-function hasActiveTenantCatalogSnapshot(catalogData: string): boolean {
-  return !catalogData.includes(NO_ACTIVE_TENANT_CATALOG_MARKER);
+function hasActiveTenantCatalogSnapshot(catalogDataset: CatalogDataset | null): boolean {
+  return Boolean(catalogDataset && catalogDataset.rows.length > 0);
 }
 
 function blockForMissingCatalog(
-  stage: ConversationStage,
-  catalogData: string
+  requestType: ChatRequestBody["type"] | undefined,
+  catalogDataset: CatalogDataset | null
 ): boolean {
-  if (hasActiveTenantCatalogSnapshot(catalogData)) {
+  if (hasActiveTenantCatalogSnapshot(catalogDataset)) {
     return false;
   }
 
-  return needsCatalogRetrieval(stage) || stage === "contextual" || stage === "upsell";
+  return requestType === "contextual" || requestType === "upsell";
 }
 
 function createMissingCatalogResponse(messages: UIMessage[]): Response {
@@ -211,12 +235,13 @@ function buildTrackedStreamResponse(input: {
   sessionId?: string;
   hostOrigin?: string;
   requestType: string;
-  stage?: ConversationStage | null;
+  analyticsLabel?: string | null;
   modelKey: string;
   modelId: string;
   inputMessageCount: number;
   streamArgs: Parameters<typeof streamText>[0];
   withTools?: boolean;
+  tools?: Parameters<typeof streamText>[0]["tools"];
 }): Response {
   const recordFinish = async (event: {
     totalUsage: LanguageModelUsage;
@@ -230,7 +255,7 @@ function buildTrackedStreamResponse(input: {
       tenantId: input.tenantId,
       sessionId: input.sessionId,
       requestType: input.requestType,
-      conversationStage: input.stage || null,
+      conversationStage: input.analyticsLabel || null,
       modelKey: input.modelKey,
       modelId: event.model.modelId || input.modelId,
       providerId: event.model.provider || null,
@@ -253,7 +278,7 @@ function buildTrackedStreamResponse(input: {
         })
       : streamText({
           ...input.streamArgs,
-          tools: chatTools,
+          tools: input.tools,
           stopWhen: isLoopFinished(),
           onFinish: recordFinish,
         });
@@ -263,94 +288,21 @@ function buildTrackedStreamResponse(input: {
   });
 }
 
-async function resolveCatalogForStage(input: {
+async function resolveCatalogForRequest(input: {
   tenantId: string;
-  stage: ConversationStage;
   type?: ChatRequestBody["type"];
-  plannerModel: Parameters<typeof planCatalogIntent>[0]["model"];
-  plainMessages: Array<{ role: "user" | "assistant"; text: string }>;
   pageContext?: PageContext;
-  browsingHistory?: BrowsingHistoryEntry[];
-  visitorProfile?: VisitorProfile;
 }) {
-  if (input.type === "upsell" || input.stage === "closing") {
+  const catalogData = buildCatalogPlaceholder(CATALOG_AGENT_NOTE);
+
+  if (input.type === "upsell") {
     return {
-      catalogData: buildCatalogPlaceholder("No main mattress catalog rows were injected for this turn. Use the accessory subset below for cross-sell decisions."),
+      catalogData,
       accessoryData: (await buildTenantCatalogContext(input.tenantId, input.pageContext?.cartItems)).accessoryData,
     };
   }
 
-  if (input.stage === "contextual") {
-    return {
-      catalogData: (await buildTenantCatalogContext(input.tenantId, input.pageContext?.cartItems)).catalogData,
-    };
-  }
-
-  if (!needsCatalogRetrieval(input.stage)) {
-    return {
-      catalogData: buildCatalogPlaceholder(),
-    };
-  }
-
-  const mode = resolveCatalogMode(process.env.CATALOG_MODE);
-  if (mode === "full") {
-    const runtimeCatalog = await buildTenantCatalogContext(
-      input.tenantId,
-      input.pageContext?.cartItems
-    );
-    return {
-      catalogData: runtimeCatalog.catalogData,
-      accessoryData: runtimeCatalog.accessoryData,
-      retrievalMeta: {
-        intentSummary: `tenant_full_catalog:${getLastUserText(input.plainMessages) || "n/a"}`,
-        sql: "tenant_catalog_snapshot",
-        rowCount: runtimeCatalog.catalogData.includes("(none)") ? 0 : undefined,
-        relaxed: false,
-        filterSummary: "full_catalog=yes",
-      },
-    };
-  }
-
-  const dataset = await getActiveCatalogDataset(input.tenantId);
-  if (!dataset || dataset.rows.length === 0) {
-    return {
-      catalogData: "# RETRIEVED CATALOG CONTEXT\n\n(no active tenant catalog snapshot)\n\n## CATALOG DATA\n\n(none)",
-      retrievalMeta: {
-        intentSummary: "retrieval_mode:no_active_catalog",
-        sql: "-- skipped",
-        rowCount: 0,
-        relaxed: false,
-        filterSummary: "active_catalog=no",
-      },
-    };
-  }
-
-  const intent = await planCatalogIntent({
-    model: input.plannerModel,
-    stage: input.stage,
-    messages: input.plainMessages,
-    pageContext: input.pageContext,
-    browsingHistory: input.browsingHistory,
-  });
-
-  const execution = await queryCatalogFromRows(dataset.rows, intent, {
-    stage: input.stage,
-    rawUserRequest: getLastUserText(input.plainMessages),
-    pageContext: input.pageContext,
-    browsingHistory: input.browsingHistory,
-    visitorProfile: input.visitorProfile,
-  });
-
-  return {
-    catalogData: formatRetrievedCatalog(execution, { intent }),
-    retrievalMeta: {
-      intentSummary: intent.intent_summary,
-      sql: execution.sql,
-      rowCount: execution.rows.length,
-      relaxed: execution.relaxed,
-      filterSummary: execution.appliedFilters.length > 0 ? execution.appliedFilters.join("; ") : "(none)",
-    },
-  };
+  return { catalogData };
 }
 
 export async function POST(request: Request) {
@@ -440,6 +392,14 @@ export async function POST(request: Request) {
     },
   });
   console.log("[chat route] tenant:", tenant.tenantKey, tenant.tenantId);
+  const activeCatalogDataset = await getActiveCatalogDataset(tenant.tenantId);
+  const makeChatTools = () =>
+    createRequestChatTools({
+      catalogDataset: activeCatalogDataset,
+      skillPrompts: tenant.skillPrompts,
+      plainMessages,
+      pageContext,
+    });
 
   try {
     console.log("[chat route] entering try block — type:", type);
@@ -472,21 +432,16 @@ export async function POST(request: Request) {
 
     if (type === "returning" && visitorProfile) {
       console.log("[chat route] → returning path");
-      const retrieval = await resolveCatalogForStage({
+      const retrieval = await resolveCatalogForRequest({
         tenantId: tenant.tenantId,
-        plannerModel: chatModel,
-        stage: "returning",
         type,
-        plainMessages,
         pageContext: pageContext ?? undefined,
-        browsingHistory: browsingHistory ?? undefined,
-        visitorProfile,
       });
-      console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "returning", {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts.returning,
+        skillPrompts: tenant.skillPrompts,
+        preloadedSkills: [{ name: "returning" }],
         visitorProfile,
         pageContext: pageContext ?? undefined,
         customerLocation,
@@ -501,10 +456,11 @@ export async function POST(request: Request) {
         sessionId,
         hostOrigin,
         requestType: "returning",
-        stage: "returning",
+        analyticsLabel: "returning",
         modelKey,
         modelId,
         inputMessageCount: messages.length,
+        tools: makeChatTools(),
         streamArgs: {
           model: chatModel,
           system: systemPrompt,
@@ -519,25 +475,20 @@ export async function POST(request: Request) {
       });
     }
 
-    // State 1: Re-engagement after 20min idle. Uses full chat history for the
+    // State 1: Re-engagement after 20min idle.
     // summary, plus the reengagement skill for phrasing.
     if (type === "reengagement") {
       console.log("[chat route] → reengagement path");
-      const retrieval = await resolveCatalogForStage({
+      const retrieval = await resolveCatalogForRequest({
         tenantId: tenant.tenantId,
-        plannerModel: chatModel,
-        stage: "reengagement",
         type,
-        plainMessages,
         pageContext: pageContext ?? undefined,
-        browsingHistory: browsingHistory ?? undefined,
-        visitorProfile: visitorProfile ?? undefined,
       });
-      console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "reengagement", {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts.reengagement,
+        skillPrompts: tenant.skillPrompts,
+        preloadedSkills: [{ name: "reengagement" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
@@ -551,7 +502,7 @@ export async function POST(request: Request) {
         sessionId,
         hostOrigin,
         requestType: "reengagement",
-        stage: "reengagement",
+        analyticsLabel: "reengagement",
         modelKey,
         modelId,
         inputMessageCount: messages.length,
@@ -566,6 +517,7 @@ export async function POST(request: Request) {
             },
           ],
         },
+        tools: makeChatTools(),
       });
     }
 
@@ -573,19 +525,13 @@ export async function POST(request: Request) {
     // Two-line plain-text summary — no product cards or action tiles.
     if (type === "contextual" && pageContext) {
       console.log("[chat route] → contextual path, product:", pageContext.productName);
-      const retrieval = await resolveCatalogForStage({
+      const retrieval = await resolveCatalogForRequest({
         tenantId: tenant.tenantId,
-        plannerModel: chatModel,
-        stage: "contextual",
         type,
-        plainMessages,
         pageContext,
-        browsingHistory: browsingHistory ?? undefined,
-        visitorProfile: visitorProfile ?? undefined,
       });
-      console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      if (blockForMissingCatalog("contextual", retrieval.catalogData)) {
+      if (blockForMissingCatalog("contextual", activeCatalogDataset)) {
         console.warn("[chat route] blocking contextual response because tenant catalog is missing");
         if (sessionId) {
           await recordConversationAnalytics({
@@ -603,9 +549,10 @@ export async function POST(request: Request) {
         }
         return createMissingCatalogResponse(messages);
       }
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "contextual", {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts.contextual,
+        skillPrompts: tenant.skillPrompts,
+        preloadedSkills: [{ name: "contextual" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext,
       });
@@ -616,7 +563,7 @@ export async function POST(request: Request) {
         sessionId,
         hostOrigin,
         requestType: "contextual",
-        stage: "contextual",
+        analyticsLabel: "contextual",
         modelKey,
         modelId,
         inputMessageCount: messages.length,
@@ -639,21 +586,16 @@ export async function POST(request: Request) {
     // new-session skill which is light — intro + stand by for user input.
     if (type === "new-session") {
       console.log("[chat route] → new-session path");
-      const retrieval = await resolveCatalogForStage({
+      const retrieval = await resolveCatalogForRequest({
         tenantId: tenant.tenantId,
-        plannerModel: chatModel,
-        stage: "new-session",
         type,
-        plainMessages,
         pageContext: pageContext ?? undefined,
-        browsingHistory: browsingHistory ?? undefined,
-        visitorProfile: visitorProfile ?? undefined,
       });
-      console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "new-session", {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts["new-session"],
+        skillPrompts: tenant.skillPrompts,
+        preloadedSkills: [{ name: "new-session" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
@@ -665,10 +607,11 @@ export async function POST(request: Request) {
         sessionId,
         hostOrigin,
         requestType: "new-session",
-        stage: "new-session",
+        analyticsLabel: "new-session",
         modelKey,
         modelId,
         inputMessageCount: messages.length,
+        tools: makeChatTools(),
         streamArgs: {
           model: chatModel,
           system: systemPrompt,
@@ -690,21 +633,16 @@ export async function POST(request: Request) {
     // which sub-template to use (compare/inform/guide/social/resume).
     if (type === "interjection" && interjectionType) {
       console.log("[chat route] → interjection path, subtype:", interjectionType);
-      const retrieval = await resolveCatalogForStage({
+      const retrieval = await resolveCatalogForRequest({
         tenantId: tenant.tenantId,
-        plannerModel: chatModel,
-        stage: "interjection",
         type,
-        plainMessages,
         pageContext: pageContext ?? undefined,
-        browsingHistory: browsingHistory ?? undefined,
-        visitorProfile: visitorProfile ?? undefined,
       });
-      console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "interjection", {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts.interjection,
+        skillPrompts: tenant.skillPrompts,
+        preloadedSkills: [{ name: "interjection" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
@@ -717,10 +655,11 @@ export async function POST(request: Request) {
         sessionId,
         hostOrigin,
         requestType: "interjection",
-        stage: "interjection",
+        analyticsLabel: "interjection",
         modelKey,
         modelId,
         inputMessageCount: messages.length,
+        tools: makeChatTools(),
         streamArgs: {
           model: chatModel,
           system: systemPrompt,
@@ -734,7 +673,7 @@ IMPORTANT context to weave in:
 - Scan the full chat history above for prior preferences, questions, or pain points the customer mentioned (sleep position, temperature, budget, back pain, partner, etc.). Reference one concrete detail if present.
 - Scan the BROWSING HISTORY section of your system prompt for specific products the customer has viewed during this session. Name the most-relevant one explicitly if it fits the interjection type (especially "compare", "inform", "social", "resume").
 - Scan the SHOPIFY CART STATUS section for what's already in the cart. NEVER re-suggest what they already have.
-- Avoid repeating any category or phrasing you've used in a prior [STAGE:interjection] message in this conversation.`,
+- Avoid repeating any category or phrasing you've used in a prior interjection message in this conversation.`,
             },
           ],
         },
@@ -745,20 +684,14 @@ IMPORTANT context to weave in:
     // Uses the upsell skill — one short suggestion + tiles. Capped at 2
     // invocations per session by the client.
     if (type === "upsell") {
-      const retrieval = await resolveCatalogForStage({
+      const retrieval = await resolveCatalogForRequest({
         tenantId: tenant.tenantId,
-        plannerModel: chatModel,
-        stage: "upsell",
         type,
-        plainMessages,
         pageContext: pageContext ?? undefined,
-        browsingHistory: browsingHistory ?? undefined,
-        visitorProfile: visitorProfile ?? undefined,
       });
-      console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
       console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
       console.log("[chat route] accessory prompt length:", retrieval.accessoryData?.length ?? 0, "chars");
-      if (blockForMissingCatalog("upsell", retrieval.catalogData)) {
+      if (blockForMissingCatalog("upsell", activeCatalogDataset)) {
         console.warn("[chat route] blocking upsell response because tenant catalog is missing");
         if (sessionId) {
           await recordConversationAnalytics({
@@ -776,9 +709,10 @@ IMPORTANT context to weave in:
         }
         return createMissingCatalogResponse(messages);
       }
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, "upsell", {
+      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts.upsell,
+        skillPrompts: tenant.skillPrompts,
+        preloadedSkills: [{ name: "upsell" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
@@ -796,18 +730,19 @@ IMPORTANT context to weave in:
         ? `\n\nThe cart already contains: ${cartList}. Do NOT suggest any of these items — pick a DIFFERENT complementary category.`
         : "";
 
-      // Also tell the AI to scan prior assistant messages with [STAGE:upsell]
-      // in this conversation and avoid repeating those categories.
-      const repeatLine = `\n\nScan your previous assistant messages in this conversation. Follow the fixed category order: Lifestyle Base → Mattress Protector → Pillow → Sheets. If you've already suggested Lifestyle Base, move to Protector. If Protector, move to Pillow. If Pillow, move to Sheets. Never repeat the same category twice in the same session. If a category's catalog section is empty (notably SHEETS), skip it silently — never invent products.`;
+      // Also tell the AI to scan prior upsell messages in this conversation
+      // and avoid repeating those categories.
+      const repeatLine = `\n\nScan your previous assistant upsell messages in this conversation. Follow the fixed category order: Lifestyle Base → Mattress Protector → Pillow → Sheets. If you've already suggested Lifestyle Base, move to Protector. If Protector, move to Pillow. If Pillow, move to Sheets. Never repeat the same category twice in the same session. If a category's catalog section is empty (notably SHEETS), skip it silently — never invent products.`;
       return buildTrackedStreamResponse({
         tenantId: tenant.tenantId,
         sessionId,
         hostOrigin,
         requestType: "upsell",
-        stage: "upsell",
+        analyticsLabel: "upsell",
         modelKey,
         modelId,
         inputMessageCount: messages.length,
+        tools: makeChatTools(),
         streamArgs: {
           model: chatModel,
           system: systemPrompt,
@@ -822,58 +757,27 @@ IMPORTANT context to weave in:
       });
     }
 
-    // Complaint override: if the user's latest message contains complaint
-    // signals (return / defect / refund / strong frustration), force the
-    // complaint stage so skills/complaint.md loads immediately — don't
-    // wait for the AI to self-route via the system prompt's override. This
-    // prevents a turn of "recommendation" or "discovery" behavior firing
-    // on top of a complaint message.
     const lastUser = [...plainMessages].reverse().find((m) => m.role === "user");
     const userSaidComplaint = lastUser ? isComplaintMessage(lastUser.text) : false;
-    const currentStage: ConversationStage = userSaidComplaint
-      ? "complaint"
-      : inferStage(plainMessages);
 
-    const retrieval = await resolveCatalogForStage({
+    const retrieval = await resolveCatalogForRequest({
       tenantId: tenant.tenantId,
-      plannerModel: chatModel,
-      stage: currentStage,
       type,
-      plainMessages,
       pageContext: pageContext ?? undefined,
-      browsingHistory: browsingHistory ?? undefined,
-      visitorProfile: visitorProfile ?? undefined,
     });
-    console.log("[chat route] retrieval:", retrieval.retrievalMeta ?? "skipped");
     console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
     console.log("[chat route] accessory prompt length:", retrieval.accessoryData?.length ?? 0, "chars");
-    if (blockForMissingCatalog(currentStage, retrieval.catalogData)) {
-      console.warn("[chat route] blocking response because tenant catalog is missing for stage:", currentStage);
-      if (sessionId) {
-        await recordConversationAnalytics({
-          tenantId: tenant.tenantId,
-          sessionId,
-          requestType: type || "chat",
-          conversationStage: currentStage,
-          modelKey,
-          modelId,
-          inputMessageCount: messages.length,
-          status: "blocked",
-          errorText: `Tenant catalog missing for ${currentStage} response.`,
-          hostOrigin,
-        });
-      }
-      return createMissingCatalogResponse(messages);
-    }
 
     const systemPrompt = [
-      buildSystemPrompt(retrieval.catalogData, currentStage, {
+      buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
-        skillPrompt: tenant.skillPrompts[currentStage],
+        skillPrompts: tenant.skillPrompts,
+        preloadedSkills: [{ name: "discovery" }, { name: "recommendation" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
         accessoryData: retrieval.accessoryData,
+        complaintHint: userSaidComplaint,
       }),
       buildCompareRequestPrompt(compareRequest),
     ]
@@ -888,10 +792,11 @@ IMPORTANT context to weave in:
       sessionId,
       hostOrigin,
       requestType: type || "chat",
-      stage: currentStage,
+      analyticsLabel: userSaidComplaint ? "complaint" : null,
       modelKey,
       modelId,
       inputMessageCount: messages.length,
+      tools: makeChatTools(),
       streamArgs: {
         model: chatModel,
         system: systemPrompt,

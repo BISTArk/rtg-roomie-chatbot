@@ -1,26 +1,11 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { Pool } from "pg";
-import type { TenantPromptStage, TenantSkillPrompts } from "../src/lib/platform-types";
-
-const PROMPT_STAGES: TenantPromptStage[] = [
-  "returning",
-  "greeting",
-  "discovery",
-  "recommendation",
-  "comparison",
-  "closing",
-  "reengagement",
-  "contextual",
-  "new-session",
-  "interjection",
-  "upsell",
-  "complaint",
-];
+import type { TenantSkillPrompts } from "../src/lib/platform-types";
 
 const ROOT = process.cwd();
 const SYSTEM_PROMPT_PATH = join(ROOT, "SYSTEM_PROMPT.md");
-const SKILLS_DIR = join(ROOT, "skills");
+const SKILLS_ROOT = join(ROOT, "skills");
 
 type CliOptions = {
   tenantKey: string | null;
@@ -74,34 +59,52 @@ function buildPool(connectionString: string): Pool {
   });
 }
 
+function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match?.[1]) return {};
+
+  const result: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const colonIndex = trimmed.indexOf(":");
+    if (colonIndex <= 0) continue;
+    const key = trimmed.slice(0, colonIndex).trim();
+    let value = trimmed.slice(colonIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
 function loadLocalPrompts(): { systemPrompt: string; skillPrompts: TenantSkillPrompts } {
   const systemPrompt = readFileSync(SYSTEM_PROMPT_PATH, "utf-8").trim();
   if (!systemPrompt) {
     throw new Error(`Missing system prompt at ${SYSTEM_PROMPT_PATH}`);
   }
 
-  const skillPrompts = PROMPT_STAGES.reduce<TenantSkillPrompts>((accumulator, stage) => {
-    const skillPath = join(SKILLS_DIR, `${stage}.md`);
-    try {
-      accumulator[stage] = readFileSync(skillPath, "utf-8").trim();
-    } catch {
-      throw new Error(`Missing skill prompt file: skills/${stage}.md`);
-    }
-    if (!accumulator[stage]) {
-      throw new Error(`Skill prompt is empty: skills/${stage}.md`);
-    }
-    return accumulator;
-  }, {});
+  const skillPrompts: TenantSkillPrompts = {};
+  for (const entry of readdirSync(SKILLS_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
 
-  const extraSkills = readdirSync(SKILLS_DIR)
-    .filter((file) => file.endsWith(".md"))
-    .map((file) => basename(file, ".md"))
-    .filter((name) => !PROMPT_STAGES.includes(name as TenantPromptStage));
+    const skillPath = join(SKILLS_ROOT, entry.name, "SKILL.md");
+    const content = readFileSync(skillPath, "utf-8").trim();
+    if (!content) {
+      throw new Error(`Skill prompt is empty: ${skillPath}`);
+    }
 
-  if (extraSkills.length > 0) {
-    console.warn(
-      `Warning: ignoring extra local skill files not in PROMPT_STAGES: ${extraSkills.join(", ")}`
-    );
+    const frontmatter = parseFrontmatter(content);
+    const name = frontmatter.name || entry.name;
+    skillPrompts[name] = content;
+  }
+
+  if (Object.keys(skillPrompts).length === 0) {
+    throw new Error(`No skills found under ${SKILLS_ROOT}`);
   }
 
   return { systemPrompt, skillPrompts };
@@ -161,7 +164,7 @@ async function pushPrompts(options: CliOptions): Promise<void> {
       `${options.dryRun ? "Would push" : "Pushing"} local prompts to ${tenants.rows.length} tenant(s)...`
     );
     console.log(`System prompt: ${systemPrompt.length.toLocaleString()} chars`);
-    console.log(`Skills: ${PROMPT_STAGES.join(", ")}`);
+    console.log(`Skills: ${Object.keys(skillPrompts).sort().join(", ")}`);
 
     for (const tenant of tenants.rows) {
       if (options.dryRun) {

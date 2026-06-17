@@ -24,10 +24,11 @@ import {
 import type {
   CatalogSourceRecord,
   CatalogVersionRecord,
-  TenantPromptStage,
   TenantRecord,
 } from "@/lib/platform-types";
-import { getDefaultSkillPrompt, getDefaultSystemPrompt } from "@/lib/system-prompt";
+import { SKILLS_RAW } from "@/data/skills-raw";
+import { getDefaultSkillRegistry } from "@/lib/skills";
+import { getDefaultSystemPrompt } from "@/lib/system-prompt";
 
 interface TenantDebugSnapshot {
   conversations: Array<{ sessionId: string; updatedAt: string }>;
@@ -60,32 +61,22 @@ type PromptEditorDraft = {
   storeLocatorUrl: string;
   handoffDescription: string;
   systemPrompt: string;
-  skillPrompts: Record<TenantPromptStage, string>;
+  skillPrompts: Record<string, string>;
 };
 
-const PROMPT_STAGE_CONFIG: Array<{
-  stage: TenantPromptStage;
-  label: string;
-  description: string;
-}> = [
-  { stage: "returning", label: "Returning", description: "Used when a known shopper comes back and the assistant should pick up continuity naturally." },
-  { stage: "greeting", label: "Greeting", description: "Handles the first welcome turn and frames the conversation tone." },
-  { stage: "discovery", label: "Discovery", description: "Guides questioning, needs assessment, and qualification." },
-  { stage: "recommendation", label: "Recommendation", description: "Controls how the assistant recommends products from the catalog." },
-  { stage: "comparison", label: "Comparison", description: "Shapes side-by-side comparison responses when shoppers weigh options." },
-  { stage: "closing", label: "Closing", description: "Handles conversion, urgency, reassurance, and purchase nudges." },
-  { stage: "reengagement", label: "Reengagement", description: "Used for proactive follow-up after activity or silence." },
-  { stage: "contextual", label: "Contextual", description: "Used for short proactive prompts based on page context and browsing signals." },
-  { stage: "new-session", label: "New Session", description: "Used when a brand-new session starts and the assistant initiates lightly." },
-  { stage: "interjection", label: "Interjection", description: "Used for short interruptions or quick helper messages during flow changes." },
-  { stage: "upsell", label: "Upsell", description: "Used for accessories, add-ons, bundles, and complementary item suggestions." },
-  { stage: "complaint", label: "Complaint", description: "Used when complaint detection forces a service-recovery response." },
-];
+const PROMPT_SKILL_CONFIG = getDefaultSkillRegistry().map((skill) => ({
+  name: skill.name,
+  label: skill.name
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" "),
+  description: skill.description,
+}));
 
 const DEFAULT_SYSTEM_PROMPT = getDefaultSystemPrompt();
 const DEFAULT_SKILL_PROMPTS = Object.fromEntries(
-  PROMPT_STAGE_CONFIG.map(({ stage }) => [stage, getDefaultSkillPrompt(stage)])
-) as Record<TenantPromptStage, string>;
+  PROMPT_SKILL_CONFIG.map(({ name }) => [name, SKILLS_RAW[name] || ""])
+) as Record<string, string>;
 
 function arePromptsEquivalent(left: string | null | undefined, right: string | null | undefined): boolean {
   return (left || "").trim() === (right || "").trim();
@@ -104,9 +95,9 @@ function formatDateTime(value: string): string {
 }
 
 function configuredSkillPromptCount(tenant: TenantRecord): number {
-  return PROMPT_STAGE_CONFIG.filter(({ stage }) => {
-    const prompt = tenant.skillPrompts[stage];
-    return Boolean(prompt?.trim()) && !arePromptsEquivalent(prompt, DEFAULT_SKILL_PROMPTS[stage]);
+  return PROMPT_SKILL_CONFIG.filter(({ name }) => {
+    const prompt = tenant.skillPrompts[name];
+    return Boolean(prompt?.trim()) && !arePromptsEquivalent(prompt, DEFAULT_SKILL_PROMPTS[name]);
   }).length;
 }
 
@@ -117,9 +108,9 @@ function getSystemPromptStatus(tenant: TenantRecord): string {
     : "Custom prompt saved";
 }
 
-function getSkillPromptStatus(value: string, stage: TenantPromptStage): "fallback" | "seeded" | "custom" {
+function getSkillPromptStatus(value: string, name: string): "fallback" | "seeded" | "custom" {
   if (!value.trim()) return "fallback";
-  return arePromptsEquivalent(value, DEFAULT_SKILL_PROMPTS[stage]) ? "seeded" : "custom";
+  return arePromptsEquivalent(value, DEFAULT_SKILL_PROMPTS[name]) ? "seeded" : "custom";
 }
 
 function buildPromptEditorDraft(tenant: TenantRecord): PromptEditorDraft {
@@ -135,10 +126,10 @@ function buildPromptEditorDraft(tenant: TenantRecord): PromptEditorDraft {
     storeLocatorUrl: tenant.prompt.storeLocatorUrl || "",
     handoffDescription: tenant.prompt.handoffDescription || "",
     systemPrompt: tenant.systemPrompt || "",
-    skillPrompts: PROMPT_STAGE_CONFIG.reduce<Record<TenantPromptStage, string>>((accumulator, { stage }) => {
-      accumulator[stage] = tenant.skillPrompts[stage] || "";
+    skillPrompts: PROMPT_SKILL_CONFIG.reduce<Record<string, string>>((accumulator, { name }) => {
+      accumulator[name] = tenant.skillPrompts[name] || "";
       return accumulator;
-    }, {} as Record<TenantPromptStage, string>),
+    }, {}),
   };
 }
 
@@ -315,9 +306,9 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                             value={configuredSkillPrompts > 0 ? `${configuredSkillPrompts} custom tenant skills` : "Using seeded DB defaults"}
                           />
                           <div className="flex flex-wrap gap-2">
-                            {PROMPT_STAGE_CONFIG.map(({ stage, label }) => (
-                              <Badge key={stage} variant={getSkillPromptStatus(tenant.skillPrompts[stage] || "", stage) === "custom" ? "default" : "secondary"}>
-                                {label} {getSkillPromptStatus(tenant.skillPrompts[stage] || "", stage) === "custom" ? "custom" : getSkillPromptStatus(tenant.skillPrompts[stage] || "", stage) === "seeded" ? "seeded" : "fallback"}
+                            {PROMPT_SKILL_CONFIG.map(({ name, label }) => (
+                              <Badge key={name} variant={getSkillPromptStatus(tenant.skillPrompts[name] || "", name) === "custom" ? "default" : "secondary"}>
+                                {label} {getSkillPromptStatus(tenant.skillPrompts[name] || "", name) === "custom" ? "custom" : getSkillPromptStatus(tenant.skillPrompts[name] || "", name) === "seeded" ? "seeded" : "fallback"}
                               </Badge>
                             ))}
                           </div>
@@ -425,11 +416,11 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
 
               <FormSection value="skills" title="Skill prompts" description="Each field overrides exactly one shared skill file for this tenant. Leave blank to inherit the shared fallback." defaultOpen>
                 <div className="grid gap-3">
-                  {PROMPT_STAGE_CONFIG.map(({ stage, label, description }) => {
-                    const currentValue = promptDraft.skillPrompts[stage];
-                    const status = getSkillPromptStatus(currentValue, stage);
+                  {PROMPT_SKILL_CONFIG.map(({ name, label, description }) => {
+                    const currentValue = promptDraft.skillPrompts[name];
+                    const status = getSkillPromptStatus(currentValue, name);
                     return (
-                      <Card key={stage} className="rounded-2xl border" style={{ borderColor: "var(--widget-border)" }}>
+                      <Card key={name} className="rounded-2xl border" style={{ borderColor: "var(--widget-border)" }}>
                         <CardHeader className="pb-3">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
@@ -440,10 +431,10 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                               <Badge variant={status === "custom" ? "default" : "secondary"}>
                                 {status === "custom" ? "Custom" : status === "seeded" ? "Seeded default" : "File fallback"}
                               </Badge>
-                              <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, skillPrompts: { ...current.skillPrompts, [stage]: DEFAULT_SKILL_PROMPTS[stage] } } : current)}>
+                              <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, skillPrompts: { ...current.skillPrompts, [name]: DEFAULT_SKILL_PROMPTS[name] } } : current)}>
                                 Load default
                               </Button>
-                              <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, skillPrompts: { ...current.skillPrompts, [stage]: "" } } : current)}>
+                              <Button type="button" variant="outline" size="sm" onClick={() => setPromptDraft((current) => current ? { ...current, skillPrompts: { ...current.skillPrompts, [name]: "" } } : current)}>
                                 Clear
                               </Button>
                             </div>
@@ -451,7 +442,7 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                         </CardHeader>
                         <CardContent>
                           <Textarea
-                            name={`skill:${stage}`}
+                            name={`skill:${name}`}
                             value={currentValue}
                             onChange={(event) =>
                               setPromptDraft((current) =>
@@ -460,14 +451,14 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                                       ...current,
                                       skillPrompts: {
                                         ...current.skillPrompts,
-                                        [stage]: event.target.value,
+                                        [name]: event.target.value,
                                       },
                                     }
                                   : current
                               )
                             }
                             className="min-h-[220px] font-mono text-xs leading-5"
-                            placeholder={`Leave blank to use the shared ${stage}.md fallback`}
+                            placeholder={`Leave blank to use the shared ${name} skill fallback`}
                           />
                         </CardContent>
                       </Card>

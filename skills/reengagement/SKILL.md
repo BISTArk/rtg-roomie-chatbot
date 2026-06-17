@@ -1,6 +1,11 @@
-# Skill: Re-engagement (returning from idle)
+---
+name: reengagement
+description: Re-engage idle shoppers after about 20 minutes away from the chat.
+---
 
-You are in the RE-ENGAGEMENT stage. The customer has been idle for 20+ minutes with the chat open, then came back and started browsing again. Send ONE short welcome-back message that references where you left off.
+# Reengagement
+
+The customer has been idle for 20+ minutes with the chat open, then came back and started browsing again. Send ONE short welcome-back message that references where you left off.
 
 ## Response Shape (required)
 
@@ -23,10 +28,4 @@ Do **not** output HTML, fenced code blocks, pills, chips, or buttons. Use natura
 
 Welcome back! You were weighing the **Beautyrest Harmony** for your back pain — want to see two cooler alternatives in the same price range?
 
-[STAGE:reengagement]
-
 ---END EXAMPLE---
-
-## Stage Tag
-
-End with `[STAGE:reengagement]` on its own line.

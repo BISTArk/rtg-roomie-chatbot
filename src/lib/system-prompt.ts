@@ -1,19 +1,11 @@
 import { SYSTEM_PROMPT_RAW } from "@/data/system-prompt-raw";
-import { SKILLS } from "@/data/skills-raw";
-
-export type ConversationStage =
-  | "returning"
-  | "greeting"
-  | "discovery"
-  | "recommendation"
-  | "comparison"
-  | "closing"
-  | "reengagement"
-  | "contextual"
-  | "new-session"
-  | "interjection"
-  | "upsell"
-  | "complaint";
+import {
+  buildSkillsPrompt,
+  discoverSkills,
+  resolveSkillContent,
+  type SkillMetadata,
+} from "@/lib/skills";
+import type { TenantSkillPrompts } from "@/lib/platform-types";
 
 export interface VisitorProfile {
   visitCount: number;
@@ -72,36 +64,16 @@ export interface CustomerLocation {
   timezone?: string;
 }
 
-/** Load a file from the prebaked data. SYSTEM_PROMPT.md and skills/*.md
- *  are pre-read at build time by scripts/prebuild.mjs so there's no
- *  runtime filesystem access on Vercel. */
-function loadFile(relativePath: string): string {
-  if (relativePath === "SYSTEM_PROMPT.md") return SYSTEM_PROMPT_RAW;
-  // skills/discovery.md → key "discovery"
-  const skillMatch = relativePath.match(/^skills\/(.+)\.md$/);
-  if (skillMatch && SKILLS[skillMatch[1]]) return SKILLS[skillMatch[1]];
-  throw new Error(`[system-prompt] Unknown file: ${relativePath}`);
-}
-
 export function getDefaultSystemPrompt(): string {
-  return loadFile("SYSTEM_PROMPT.md");
+  return SYSTEM_PROMPT_RAW;
 }
 
-export function getDefaultSkillPrompt(stage: ConversationStage): string {
-  return loadFile(`skills/${stage}.md`);
-}
-
-/** Lightweight safety net: strip any stray fenced HTML blocks that may
- *  have survived the source-file cleanup. The skill files now use
- *  tool-based instructions, but this catches edge cases where a raw
- *  ```html block appears in a prompt override. */
-function stripLegacyHtmlInstructions(prompt: string): string {
-  return prompt
-    .replace(/```html[\s\S]*?```/gi, "")
-    .replace(
-      /\(three backticks\)html[\s\S]*?\(three backticks\)/gi,
-      ""
-    );
+export function getDefaultSkillContent(skillName: string): string {
+  const content = resolveSkillContent(skillName);
+  if (!content) {
+    throw new Error(`[system-prompt] Unknown skill: ${skillName}`);
+  }
+  return content;
 }
 
 /**
@@ -217,11 +189,13 @@ const UI_INSTRUCTIONS = [
   "Do NOT write fenced HTML, HTML product cards, HTML chips, inline buttons, or JavaScript handlers in chat responses.",
   "",
   "Use tools for interactive UI:",
+  "- Specialized playbooks -> `load_skill`",
   "- Discovery and guided-selling questions -> `ask_user_question`",
   "- Product recommendation cards -> `product_search`",
   "- Product comparisons -> `compare_tool`",
   "",
   "Plain assistant text should be concise markdown only. Never use fenced HTML blocks.",
+  "Never output `[STAGE:...]` metadata tags or any routing markers — the server handles flow routing.",
   "",
   "### Discovery Questions Use The Tool",
   "",
@@ -235,6 +209,17 @@ const UI_INSTRUCTIONS = [
   "- If you need one more preference after prior answers, call `ask_user_question` again. Do not create HTML fallback controls.",
   "- After the tool returns answers, continue naturally and move toward recommendations.",
   "",
+  "### Product Search Uses The Catalog Agent",
+  "",
+  "The full product catalog is NOT in this prompt.",
+  "When you need products, call `product_search` with the shopper request and known constraints.",
+  "That tool runs a dedicated catalog retrieval agent against the full store catalog and returns matching product cards.",
+  "",
+  "- Do NOT invent products, prices, links, images, SKUs, or variant IDs.",
+  "- Use the exact products returned by `product_search` for recommendations and follow-up compare requests.",
+  "- Write at most one short setup sentence before the tool call and one short follow-up question after it.",
+  "- If the shopper asks to compare products you just showed, call `compare_tool` with those exact returned products.",
+  "",
   "### Product Comparison Uses The Tool",
   "",
   "When the shopper wants to compare 2 to 4 specific products, call the `compare_tool`.",
@@ -244,31 +229,32 @@ const UI_INSTRUCTIONS = [
   "- Include a `recommendation` when one option is clearly the best fit.",
   "- The tool UI renders the side-by-side comparison, so keep surrounding prose brief and do not recreate the table in markdown.",
   "",
-  "### Product Recommendations Use The Tool",
-  "",
-  "EVERY TIME you recommend, mention, or discuss specific mattress products, call the `product_search` tool. Do not render product cards as HTML. The catalog has already been injected into your prompt; the tool is only the UI surface for showing product cards.",
-  "",
-  "- Choose products from the injected CATALOG_DATA yourself. There is no external lookup.",
-  "- Pass 1 to 6 exact products to `product_search.products`.",
-  "- Copy values from the same catalog row. Do not invent names, prices, links, images, SKUs, or variant IDs.",
-  "- Map catalog columns into product fields:",
-  "  - Product name/title -> `title`",
-  "  - Image 1 -> `image`",
-  "  - Product Link -> `link`",
-  "  - Shopify Variant ID -> `shopifyVariantId`",
-  "  - Sale Price -> `salePrice`",
-  "  - Regular Price -> `regularPrice`",
-  "  - Brand/Theme/vendor -> `brand` when available",
-  "  - Mattress Size -> `size`",
-  "  - Mattress Type/category -> `category`",
-  "  - One-line fit reason -> `summary`",
-  "- Write at most one short setup sentence before the tool call and one short follow-up question after it.",
-  "- If the shopper asks to compare the displayed products, use `compare_tool` with the same product objects.",
-  "",
   "### Post-Product Follow-up",
   "",
   "After `product_search`, ask a brief natural-language follow-up. Do not create HTML action bars or HTML chips for product follow-up actions.",
 ].join("\n");
+
+type PreloadedSkill = { name: string; content?: string | null };
+
+function buildPreloadedSkillsSection(
+  skills: PreloadedSkill[],
+  skillPrompts?: TenantSkillPrompts | null
+): string {
+  const blocks = skills.map((skill) => {
+    const content =
+      skill.content?.trim() ||
+      resolveSkillContent(skill.name, skillPrompts ?? null) ||
+      "";
+    return `## ${skill.name}\n\n${content}`;
+  });
+
+  const header =
+    skills.length === 1
+      ? `# ACTIVE SKILL (${skills[0].name})`
+      : `# ACTIVE SKILLS (${skills.map((skill) => skill.name).join(", ")})`;
+
+  return `\n\n---\n\n${header}\n\n${blocks.join("\n\n---\n\n")}`;
+}
 
 /** Render a compact CUSTOMER LOCATION block when any geo field is present.
  *  Returns "" when the location is entirely missing (localhost, preview,
@@ -295,46 +281,54 @@ function buildCustomerLocationBlock(loc?: CustomerLocation): string {
 
 export function buildSystemPrompt(
   catalogData: string,
-  stage: ConversationStage,
   options?: {
     systemPrompt?: string | null;
-    skillPrompt?: string | null;
+    skills?: SkillMetadata[];
+    skillPrompts?: TenantSkillPrompts | null;
+    preloadedSkills?: PreloadedSkill[];
     pageContext?: PageContext;
     visitorProfile?: VisitorProfile;
     accessoryData?: string;
     interjectionType?: string;
     customerLocation?: CustomerLocation;
+    complaintHint?: boolean;
   }
 ): string {
-  // Load universal rules
   const base = (options?.systemPrompt?.trim() || getDefaultSystemPrompt()).replace(
     "{{CATALOG_DATA}}",
     catalogData
   );
 
-  // Load stage-specific skill
-  const skill = stripLegacyHtmlInstructions(
-    options?.skillPrompt?.trim() || getDefaultSkillPrompt(stage)
-  );
+  const skills =
+    options?.skills ?? discoverSkills(options?.skillPrompts ?? null);
 
-  // Build human-readable context (always included when available)
+  const preloadedSkills = options?.preloadedSkills ?? [];
+  const skillSection =
+    preloadedSkills.length > 0
+      ? buildPreloadedSkillsSection(
+          preloadedSkills,
+          options?.skillPrompts ?? null
+        )
+      : `\n\n---\n\n${buildSkillsPrompt(skills)}`;
+
+  const complaintHint = options?.complaintHint
+    ? "\n\n**IMPORTANT:** The customer's latest message looks like a complaint or support request. Call `load_skill` with name `complaint` before responding."
+    : "";
+
   const contextNarrative = buildContextNarrative(
     options?.pageContext,
     options?.visitorProfile
   );
 
-  // Inject accessory catalog for closing stage
   const accessoryBlock = options?.accessoryData
     ? `\n\n---\n\n${options.accessoryData}`
     : "";
 
-  // For interjection stage, tell the skill which sub-template to use
   const interjectionBlock = options?.interjectionType
     ? `\n\n---\n\n# INTERJECTION TYPE\n\nUse the "${options.interjectionType}" sub-template from the skill above.`
     : "";
 
   const locationBlock = buildCustomerLocationBlock(options?.customerLocation);
 
-  // Combine: universal rules + current stage skill + context + accessory data + location + output rules
-  return `${base}\n\n---\n\n# ACTIVE SKILL\n\n${skill}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}\n\n---\n\n${UI_INSTRUCTIONS}`;
+  return `${base}${skillSection}${complaintHint}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}\n\n---\n\n${UI_INSTRUCTIONS}`;
 }

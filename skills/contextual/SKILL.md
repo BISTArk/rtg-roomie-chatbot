@@ -1,6 +1,11 @@
-# Skill: Contextual Product Summary
+---
+name: contextual
+description: Write a two-line PDP product summary for proactive peek bubbles on product pages.
+---
 
-You are in the CONTEXTUAL stage. The customer landed on a product page while browsing. They did NOT click this product from inside the chat — they navigated to it on the Shopify site. Your job is a short plain-text summary of **what this product is**.
+# Contextual
+
+The customer landed on a product page while browsing. They did NOT click this product from inside the chat — they navigated to it on the Shopify site. Your job is a short plain-text summary of **what this product is**.
 
 ## Response Shape (required)
 
@@ -25,7 +30,3 @@ Write **exactly two lines** of plain markdown prose:
 - ❌ Long paragraphs or more than two lines
 - ❌ Product cards, images, or `product_search`
 - ❌ Follow-up questions — save those for when they open chat
-
-## Stage Tag
-
-End with `[STAGE:contextual]` on its own line after the two lines.

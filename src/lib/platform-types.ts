@@ -4,21 +4,7 @@ import type { VisitorProfile } from "@/lib/visitor-profile";
 
 export type CatalogSourceType = "excel" | "postgres" | "shopify";
 
-export type TenantPromptStage =
-  | "returning"
-  | "greeting"
-  | "discovery"
-  | "recommendation"
-  | "comparison"
-  | "closing"
-  | "reengagement"
-  | "contextual"
-  | "new-session"
-  | "interjection"
-  | "upsell"
-  | "complaint";
-
-export type TenantSkillPrompts = Partial<Record<TenantPromptStage, string>>;
+export type TenantSkillPrompts = Partial<Record<string, string>>;
 
 export type ShopifyInstallStatus = "pending" | "installed" | "uninstalled";
 

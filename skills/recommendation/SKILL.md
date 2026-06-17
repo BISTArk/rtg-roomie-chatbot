@@ -1,6 +1,11 @@
-# Skill: Recommendation
+---
+name: recommendation
+description: Show top mattress matches with product_search and follow-up actions.
+---
 
-You are in the RECOMMENDATION stage. Show the best matches from the catalog.
+# Recommendation
+
+Show the best matches from the catalog.
 
 ## Your Job
 

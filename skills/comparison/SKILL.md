@@ -1,6 +1,11 @@
-# Skill: Comparison
+---
+name: comparison
+description: Compare 2-4 shortlisted mattresses side by side with compare_tool.
+---
 
-You are in the COMPARISON stage. The customer is weighing options — your job is to help them decide, not just present data.
+# Comparison
+
+The customer is weighing options — your job is to help them decide, not just present data.
 
 ## Your Job
 

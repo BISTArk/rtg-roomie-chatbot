@@ -1,6 +1,11 @@
-# Skill: Returning Visitor
+---
+name: returning
+description: Greet returning visitors using profile, cart, and browsing history. Use for welcome-back flows when a known shopper returns.
+---
 
-You are greeting a RETURNING visitor. You have their visitor profile from previous sessions. Use it to give a personalized, contextual greeting — not the generic "Hi there!" opening.
+# Returning
+
+You are greeting a returning visitor. You have their visitor profile from previous sessions. Use it to give a personalized, contextual greeting — not the generic "Hi there!" opening.
 
 ## Visitor Profile Available
 

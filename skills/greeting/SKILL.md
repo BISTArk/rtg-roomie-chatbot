@@ -1,6 +1,11 @@
-# Skill: Greeting
+---
+name: greeting
+description: Open a new shopper conversation warmly and ask why they are mattress shopping.
+---
 
-You are in the GREETING stage. Your first message sets the tone for the entire conversation.
+# Greeting
+
+Your first message sets the tone for the entire conversation.
 
 ## Your Job (exactly 2 things)
 

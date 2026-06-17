@@ -111,6 +111,3 @@ export function isProactiveBudgetExhausted(messages: UIMessage[]): boolean {
   if (hasUserEngaged(messages)) return false;
   return getProactiveAttemptCount() >= PROACTIVE_ATTEMPT_LIMIT;
 }
-
-/** @deprecated Use isProactiveBudgetExhausted */
-export const isPreEngagementExhausted = isProactiveBudgetExhausted;

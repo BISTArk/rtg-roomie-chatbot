@@ -1,6 +1,8 @@
 import type { UIMessage } from "ai";
-import { INTERJECTION_SUGGESTION_FALLBACKS, type InterjectionType } from "@/lib/interjection";
-import type { SuggestionsContext } from "@/lib/suggestions";
+import {
+  getProactiveSuggestionFallbacks,
+  type SuggestionsContext,
+} from "@/lib/suggestions";
 
 export const chatQuickSuggestions = [
   "Help me find the right fit",
@@ -8,12 +10,6 @@ export const chatQuickSuggestions = [
   "Just browsing",
   "Show me popular picks",
 ];
-
-export function getInterjectionSuggestionFallbacks(
-  interjectionType: InterjectionType = "guide"
-): string[] {
-  return [...INTERJECTION_SUGGESTION_FALLBACKS[interjectionType]];
-}
 
 export async function fetchSuggestions(
   messages: UIMessage[],
@@ -47,25 +43,6 @@ export async function fetchSuggestions(
 
   if (context?.mode && context.mode !== "follow-up") {
     return getProactiveSuggestionFallbacks(context.mode, context.interjectionType);
-  }
-  return [];
-}
-
-export function getProactiveSuggestionFallbacks(
-  mode: NonNullable<SuggestionsContext["mode"]>,
-  interjectionType?: InterjectionType
-): string[] {
-  if (mode === "interjection") {
-    return getInterjectionSuggestionFallbacks(interjectionType);
-  }
-  if (mode === "new-session") {
-    return ["Help me pick a mattress", "Show bestsellers", "Just browsing"];
-  }
-  if (mode === "reengagement") {
-    return ["Yes, show me", "Just browsing", "Help me find a store", "Talk to an agent"];
-  }
-  if (mode === "upsell") {
-    return ["Show me protectors", "Other accessories", "I'm all set"];
   }
   return [];
 }

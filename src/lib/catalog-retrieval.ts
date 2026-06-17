@@ -10,7 +10,6 @@ import {
 } from "@/data/catalog-db";
 import type {
   BrowsingHistoryEntry,
-  ConversationStage,
   PageContext,
   VisitorProfile,
 } from "@/lib/system-prompt";
@@ -64,7 +63,7 @@ export interface RetrievedCatalogRow {
 }
 
 export interface RetrievedCatalogContext {
-  stage: ConversationStage;
+  stage: string;
   rawUserRequest: string;
   pageContext?: PageContext;
   browsingHistory?: BrowsingHistoryEntry[];
@@ -242,7 +241,7 @@ function normalizeIntent(raw: unknown): CatalogIntent {
 }
 
 function buildPlannerPrompt(input: {
-  stage: ConversationStage;
+  stage: string;
   messages: Array<{ role: string; text: string }>;
   pageContext?: PageContext;
   browsingHistory?: BrowsingHistoryEntry[];
@@ -276,7 +275,7 @@ function buildPlannerPrompt(input: {
 
 export async function planCatalogIntent(input: {
   model: PlannerModel;
-  stage: ConversationStage;
+  stage: string;
   messages: Array<{ role: string; text: string }>;
   pageContext?: PageContext;
   browsingHistory?: BrowsingHistoryEntry[];
@@ -848,10 +847,6 @@ export async function fetchContextualCatalogData(pageContext?: PageContext): Pro
   return execution.rows.length > 0
     ? formatRetrievedCatalog(execution, { intent })
     : buildCatalogPlaceholder();
-}
-
-export function needsCatalogRetrieval(stage: ConversationStage): boolean {
-  return !["returning", "reengagement", "interjection", "new-session", "complaint", "upsell"].includes(stage);
 }
 
 export function getLastUserText(messages: Array<{ role: string; text: string }>): string {

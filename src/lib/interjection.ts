@@ -1,18 +1,19 @@
 import type { UIMessage } from "ai";
 import type { BrowsingHistoryEntry, PageContext } from "@/lib/system-prompt";
-import { detectStageFromResponse, stripStageTag } from "@/lib/stage-tag";
 
 export const INTERJECTION_MESSAGE_ID_PREFIX = "interjection-";
-export const PROACTIVE_TRANSIENT_ID_PREFIX = "proactive-transient-";
-export const COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX = "proactive-";
+export const NEW_SESSION_MESSAGE_ID_PREFIX = "new-session-";
+export const CONTEXTUAL_MESSAGE_ID_PREFIX = "contextual-";
+export const REENGAGEMENT_MESSAGE_ID_PREFIX = "reengagement-";
+export const UPSELL_MESSAGE_ID_PREFIX = "upsell-";
 
-const TRANSIENT_STAGES = new Set([
-  "new-session",
-  "interjection",
-  "contextual",
-  "reengagement",
-  "upsell",
-]);
+const TRANSIENT_PROACTIVE_PREFIXES = [
+  INTERJECTION_MESSAGE_ID_PREFIX,
+  NEW_SESSION_MESSAGE_ID_PREFIX,
+  CONTEXTUAL_MESSAGE_ID_PREFIX,
+  REENGAGEMENT_MESSAGE_ID_PREFIX,
+  UPSELL_MESSAGE_ID_PREFIX,
+] as const;
 
 function getTextParts(message: UIMessage) {
   return message.parts.filter(
@@ -20,271 +21,76 @@ function getTextParts(message: UIMessage) {
   );
 }
 
-function getTransientStageFromText(text: string): string | null {
-  const detected = detectStageFromResponse(text.trim());
-  if (detected && TRANSIENT_STAGES.has(detected)) return detected;
-
-  const match = text.match(
-    /\[STAGE:\s*(new-session|interjection|contextual|reengagement|upsell)\s*\]/i
-  );
-  return match ? match[1].toLowerCase() : null;
+export function getAssistantMessageText(message: UIMessage): string {
+  return getTextParts(message)
+    .map((part) => part.text)
+    .join("")
+    .trim();
 }
 
-export function messageHasInterjectionStage(message: UIMessage): boolean {
-  return getTextParts(message).some(
-    (part) => getTransientStageFromText(part.text) === "interjection"
-  );
+function createProactiveId(prefix: string, suffix?: string): string {
+  const id =
+    suffix ??
+    (typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}`);
+  return `${prefix}${id}`;
 }
 
-export function messageHasNewSessionStage(message: UIMessage): boolean {
-  return getTextParts(message).some(
-    (part) => getTransientStageFromText(part.text) === "new-session"
-  );
+export function createInterjectionMessageId(suffix?: string) {
+  return createProactiveId(INTERJECTION_MESSAGE_ID_PREFIX, suffix);
 }
 
-export function messageHasContextualStage(message: UIMessage): boolean {
-  return getTextParts(message).some(
-    (part) => getTransientStageFromText(part.text) === "contextual"
-  );
+export function createNewSessionMessageId(suffix?: string) {
+  return createProactiveId(NEW_SESSION_MESSAGE_ID_PREFIX, suffix);
+}
+
+export function createContextualMessageId(suffix?: string) {
+  return createProactiveId(CONTEXTUAL_MESSAGE_ID_PREFIX, suffix);
+}
+
+export function createReengagementMessageId(suffix?: string) {
+  return createProactiveId(REENGAGEMENT_MESSAGE_ID_PREFIX, suffix);
+}
+
+export function createUpsellMessageId(suffix?: string) {
+  return createProactiveId(UPSELL_MESSAGE_ID_PREFIX, suffix);
+}
+
+function hasTransientProactiveId(messageId: string): boolean {
+  return TRANSIENT_PROACTIVE_PREFIXES.some((prefix) => messageId.includes(prefix));
+}
+
+export function isInterjectionMessage(message: UIMessage): boolean {
+  return message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX);
 }
 
 export function isNewSessionMessage(message: UIMessage): boolean {
-  return messageHasNewSessionStage(message);
+  return message.id.includes(NEW_SESSION_MESSAGE_ID_PREFIX);
+}
+
+export function isContextualMessage(message: UIMessage): boolean {
+  return message.id.includes(CONTEXTUAL_MESSAGE_ID_PREFIX);
 }
 
 /** Proactive peek bubbles that show prose + suggestion chips together. */
 export function messageNeedsPeekSuggestions(message: UIMessage): boolean {
-  return (
-    messageHasInterjectionStage(message) ||
-    messageHasNewSessionStage(message) ||
-    message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX) ||
-    message.id.includes(PROACTIVE_TRANSIENT_ID_PREFIX)
-  );
-}
-
-/** @deprecated Use messageNeedsPeekSuggestions */
-export function supportsProactivePeekWithSuggestions(message: UIMessage): boolean {
-  return messageNeedsPeekSuggestions(message);
-}
-
-export function createProactiveMessageId(suffix?: string) {
-  const id =
-    suffix ??
-    (typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}`);
-  return `${PROACTIVE_TRANSIENT_ID_PREFIX}${id}`;
-}
-
-export function createInterjectionMessageId(suffix?: string) {
-  const id =
-    suffix ??
-    (typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}`);
-  return `${INTERJECTION_MESSAGE_ID_PREFIX}${id}`;
-}
-
-export function isInterjectionMessage(messageOrId: UIMessage | string): boolean {
-  if (typeof messageOrId === "string") {
-    return false;
-  }
-
-  return messageHasInterjectionStage(messageOrId);
-}
-
-function hasProactiveTransientId(messageId: string): boolean {
-  return (
-    messageId.includes(PROACTIVE_TRANSIENT_ID_PREFIX) ||
-    messageId.includes(INTERJECTION_MESSAGE_ID_PREFIX)
-  );
+  return isInterjectionMessage(message) || isNewSessionMessage(message);
 }
 
 /** Transient proactive assistant messages shown as closed-state bubbles. */
 export function isTransientProactiveMessage(message: UIMessage): boolean {
   if (message.role !== "assistant") return false;
   if (message.id === "welcome") return false;
-  if (hasProactiveTransientId(message.id)) return true;
-  return getTextParts(message).some(
-    (part) => getTransientStageFromText(part.text) != null
-  );
-}
-
-function promoteCommittedAssistantId(messageId: string): string {
-  if (messageId.includes(COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX)) {
-    return messageId;
-  }
-
-  if (messageId.includes(INTERJECTION_MESSAGE_ID_PREFIX)) {
-    const suffix = messageId.slice(INTERJECTION_MESSAGE_ID_PREFIX.length).trim();
-    return suffix
-      ? `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${suffix}`
-      : `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${Date.now()}`;
-  }
-
-  if (messageId.includes(PROACTIVE_TRANSIENT_ID_PREFIX)) {
-    const suffix = messageId.slice(PROACTIVE_TRANSIENT_ID_PREFIX.length).trim();
-    return suffix
-      ? `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${suffix}`
-      : `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${Date.now()}`;
-  }
-
-  return `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${messageId}`;
-}
-
-function isCommittedProactiveMessage(message: UIMessage): boolean {
-  return message.id.includes(COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX);
-}
-
-function isNonMergeableProactiveMessage(message: UIMessage): boolean {
-  return isTransientProactiveMessage(message) || isCommittedProactiveMessage(message);
-}
-
-function splitTextPartByTransientStage(
-  part: { type: "text"; text: string }
-): Array<{ parts: UIMessage["parts"]; stage: string | null }> {
-  const match = part.text.match(
-    /\[STAGE:\s*(new-session|interjection|contextual|reengagement|upsell)\s*\]/i
-  );
-
-  if (!match || match.index == null) {
-    return [{ parts: [part], stage: null }];
-  }
-
-  const stage = match[1].toLowerCase();
-  const before = part.text.slice(0, match.index).trim();
-  const after = part.text.slice(match.index).trim();
-  const segments: Array<{ parts: UIMessage["parts"]; stage: string | null }> = [];
-
-  if (before) {
-    segments.push({ parts: [{ type: "text", text: before }], stage: null });
-  }
-  if (after) {
-    segments.push({ parts: [{ type: "text", text: after }], stage });
-  }
-
-  return segments.length > 0 ? segments : [{ parts: [part], stage: null }];
-}
-
-/** Keep proactive peek messages in chat history once the shopper engages. */
-export function commitTransientProactiveMessages(messages: UIMessage[]): UIMessage[] {
-  let changed = false;
-
-  const next = messages.map((message) => {
-    if (!isTransientProactiveMessage(message)) return message;
-
-    changed = true;
-    return {
-      ...message,
-      id: promoteCommittedAssistantId(message.id),
-      parts: message.parts.map((part) =>
-        part.type === "text"
-          ? { ...part, text: stripStageTag(part.text).trim() }
-          : part
-      ),
-    };
-  });
-
-  return changed ? next : messages;
-}
-
-function isTransientAssistantMessage(message: UIMessage): boolean {
-  if (message.role !== "assistant") return false;
-  if (message.id === "welcome") return true;
-  if (isNonMergeableProactiveMessage(message)) return true;
-  return getTextParts(message).some(
-    (part) => getTransientStageFromText(part.text) != null
-  );
+  return hasTransientProactiveId(message.id);
 }
 
 export function shouldMergeAssistantMessages(previous: UIMessage, message: UIMessage) {
   if (message.role !== "assistant" || previous.role !== "assistant") return false;
-  if (isNonMergeableProactiveMessage(previous) || isNonMergeableProactiveMessage(message)) {
+  if (isTransientProactiveMessage(previous) || isTransientProactiveMessage(message)) {
     return false;
   }
   return true;
-}
-
-export function splitTransientAssistantMessages(messages: UIMessage[]): UIMessage[] {
-  const split: UIMessage[] = [];
-
-  for (const message of messages) {
-    if (message.role !== "assistant") {
-      split.push(message);
-      continue;
-    }
-
-    const segments: Array<{ parts: UIMessage["parts"]; stage: string | null }> = [];
-    let currentParts: UIMessage["parts"] = [];
-
-    for (const part of message.parts) {
-      if (part.type === "text") {
-        const textSegments = splitTextPartByTransientStage(part);
-        for (const segment of textSegments) {
-          if (segment.stage) {
-            if (currentParts.length > 0) {
-              segments.push({ parts: currentParts, stage: null });
-              currentParts = [];
-            }
-            segments.push(segment);
-            continue;
-          }
-
-          currentParts.push(...segment.parts);
-        }
-        continue;
-      }
-
-      currentParts.push(part);
-    }
-
-    if (currentParts.length > 0) {
-      segments.push({ parts: currentParts, stage: null });
-    }
-
-    if (segments.length <= 1) {
-      const only = segments[0];
-      if (only?.stage === "interjection") {
-        split.push({
-          ...message,
-          id: message.id.includes(INTERJECTION_MESSAGE_ID_PREFIX)
-            ? message.id
-            : createInterjectionMessageId(message.id),
-          parts: only.parts,
-        });
-      } else if (only?.stage === "new-session") {
-        split.push({
-          ...message,
-          id: message.id.includes(PROACTIVE_TRANSIENT_ID_PREFIX)
-            ? message.id
-            : createProactiveMessageId(message.id),
-          parts: only.parts,
-        });
-      } else {
-        split.push(message);
-      }
-      continue;
-    }
-
-    segments.forEach((segment, index) => {
-      const id =
-        segment.stage === "interjection"
-          ? createInterjectionMessageId(`${message.id}-${index}`)
-          : segment.stage
-            ? `${COMMITTED_PROACTIVE_MESSAGE_ID_PREFIX}${message.id}-${index}`
-            : index === 0
-              ? message.id
-              : `${message.id}-segment-${index}`;
-
-      split.push({
-        ...message,
-        id,
-        parts: segment.parts,
-      });
-    });
-  }
-
-  return split;
 }
 
 export const INTERJECTION_TYPES = [

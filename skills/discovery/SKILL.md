@@ -1,6 +1,11 @@
-# Skill: Discovery
+---
+name: discovery
+description: Qualify mattress needs with ask_user_question (max 2 turns) before showing products.
+---
 
-You are in the DISCOVERY stage. Get to products FAST. You have a MAX of 2 question-turns before showing products.
+# Discovery
+
+Get to products FAST. You have a MAX of 2 question-turns before showing products.
 
 ## CRITICAL: 2-Question Limit
 
