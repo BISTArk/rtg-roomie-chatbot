@@ -1,11 +1,26 @@
 import type { UIMessage } from "ai";
 import type { BrowsingHistoryEntry, PageContext } from "@/lib/system-prompt";
+import { getScopedSessionKey } from "@/lib/browser-session";
 
 export const INTERJECTION_MESSAGE_ID_PREFIX = "interjection-";
 export const NEW_SESSION_MESSAGE_ID_PREFIX = "new-session-";
 export const CONTEXTUAL_MESSAGE_ID_PREFIX = "contextual-";
 export const REENGAGEMENT_MESSAGE_ID_PREFIX = "reengagement-";
 export const UPSELL_MESSAGE_ID_PREFIX = "upsell-";
+
+/** First three closed-chat interjections: 1 min, 3 min, 8 min from baseline. */
+export const STATE3_THRESHOLDS_MS = [60_000, 180_000, 480_000] as const;
+/** After the third interjection, wait 8 minutes between subsequent ones. */
+export const STATE3_RECURRING_GAP_MS = 480_000;
+/** Don't fire an interjection shortly after new-session or contextual peek. */
+export const INTERJECTION_COOLDOWN_AFTER_PEEK_MS = 60_000;
+export const STANDALONE_INTERJECTION_DELAY_MS = STATE3_THRESHOLDS_MS[0];
+
+export const INTERJECTION_TYPES_USED_KEY = "interjection_types_used";
+
+export function getInterjectionTypesUsedStorageKey(): string {
+  return getScopedSessionKey(INTERJECTION_TYPES_USED_KEY);
+}
 
 const TRANSIENT_PROACTIVE_PREFIXES = [
   INTERJECTION_MESSAGE_ID_PREFIX,
@@ -14,6 +29,8 @@ const TRANSIENT_PROACTIVE_PREFIXES = [
   REENGAGEMENT_MESSAGE_ID_PREFIX,
   UPSELL_MESSAGE_ID_PREFIX,
 ] as const;
+
+const INTERJECTION_TYPE_PATTERN = /interjection-(guide|compare|inform|social|resume)-/;
 
 function getTextParts(message: UIMessage) {
   return message.parts.filter(
@@ -37,8 +54,28 @@ function createProactiveId(prefix: string, suffix?: string): string {
   return `${prefix}${id}`;
 }
 
-export function createInterjectionMessageId(suffix?: string) {
-  return createProactiveId(INTERJECTION_MESSAGE_ID_PREFIX, suffix);
+export function createInterjectionMessageId(
+  suffix?: string,
+  type?: InterjectionType
+) {
+  const id =
+    suffix ??
+    (typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}`);
+  if (type) {
+    return `${INTERJECTION_MESSAGE_ID_PREFIX}${type}-${id}`;
+  }
+  return createProactiveId(INTERJECTION_MESSAGE_ID_PREFIX, id);
+}
+
+export function getInterjectionTypeFromMessage(
+  message: UIMessage
+): InterjectionType | null {
+  if (!isInterjectionMessage(message)) return null;
+  const match = message.id.match(INTERJECTION_TYPE_PATTERN);
+  if (!match?.[1]) return null;
+  return match[1] as InterjectionType;
 }
 
 export function createNewSessionMessageId(suffix?: string) {
@@ -119,24 +156,121 @@ export const PROACTIVE_SUGGESTION_FALLBACKS = {
 
 export type ProactiveSuggestionMode = keyof typeof PROACTIVE_SUGGESTION_FALLBACKS;
 
-export const STANDALONE_INTERJECTION_DELAY_MS = 8_000;
 export const INTERJECTION_DISMISSED_KEY = "interjection_dismissed";
 
-export function pickInterjectionType(input: {
+function isInterjectionType(value: string): value is InterjectionType {
+  return (INTERJECTION_TYPES as readonly string[]).includes(value);
+}
+
+export function rankInterjectionTypes(input: {
   pageContext: PageContext | null;
   messages: UIMessage[];
   browsingHistory: BrowsingHistoryEntry[];
-}): InterjectionType {
+}): InterjectionType[] {
   const userMessages = input.messages.filter((message) => message.role === "user");
   const productsViewed = input.browsingHistory.length;
   const isPdp =
     input.pageContext?.page === "pdp" && Boolean(input.pageContext.productName);
 
-  if (userMessages.length >= 2) return "resume";
-  if (isPdp) return "inform";
-  if (productsViewed >= 2) return "compare";
-  if (productsViewed === 1) return "social";
-  return "guide";
+  const ranked: InterjectionType[] = [];
+  if (userMessages.length >= 2) ranked.push("resume");
+  if (isPdp) ranked.push("inform");
+  if (productsViewed >= 2) ranked.push("compare");
+  if (productsViewed === 1) ranked.push("social");
+  ranked.push("guide");
+
+  return [...new Set(ranked)];
+}
+
+export function readUsedInterjectionTypes(storageKey: string): InterjectionType[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is InterjectionType =>
+      typeof entry === "string" && isInterjectionType(entry)
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function recordUsedInterjectionType(
+  storageKey: string,
+  type: InterjectionType
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const used = readUsedInterjectionTypes(storageKey);
+    if (!used.includes(type)) {
+      used.push(type);
+    }
+    const trimmed = used.slice(-INTERJECTION_TYPES.length);
+    sessionStorage.setItem(storageKey, JSON.stringify(trimmed));
+  } catch {
+    // noop
+  }
+}
+
+export function pickInterjectionType(input: {
+  pageContext: PageContext | null;
+  messages: UIMessage[];
+  browsingHistory: BrowsingHistoryEntry[];
+  usedTypes?: InterjectionType[];
+}): InterjectionType {
+  const ranked = rankInterjectionTypes(input);
+  const used = new Set(input.usedTypes ?? []);
+
+  for (const type of ranked) {
+    if (!used.has(type)) {
+      return type;
+    }
+  }
+
+  return ranked[0] ?? "guide";
+}
+
+export function buildInterjectionTriggerPrompt(input: {
+  interjectionType: InterjectionType;
+  pageContext?: PageContext;
+  browsingHistory?: BrowsingHistoryEntry[];
+}): string {
+  const page = input.pageContext;
+  const history = input.browsingHistory ?? page?.browsingHistory ?? [];
+  const recentProducts = history
+    .slice(0, 5)
+    .map((entry) =>
+      entry.productPrice
+        ? `${entry.productName} (${entry.productPrice})`
+        : entry.productName
+    )
+    .join("; ");
+
+  const lines = [
+    `Generate an interjection of type "${input.interjectionType}" NOW, following the interjection skill's "${input.interjectionType}" sub-template.`,
+    "The customer has the chat closed. Output prose only for the peek bubble — no tools, no product cards.",
+    "",
+    "Use the context below together with the system prompt sections (CURRENT PAGE CONTEXT, BROWSING HISTORY, SHOPIFY CART STATUS, and chat history):",
+    `- Current page: ${page?.page ?? "unknown"}`,
+    page?.productName ? `- Current product: ${page.productName}` : null,
+    page?.category ? `- Current category: ${page.category}` : null,
+    page?.searchQuery ? `- Search query: ${page.searchQuery}` : null,
+    page?.cartItems?.length
+      ? `- Cart items: ${page.cartItems.join("; ")}`
+      : "- Cart: empty",
+    recentProducts ? `- Recently viewed: ${recentProducts}` : "- Recently viewed: none",
+    "",
+    "Rules:",
+    "- Reference one concrete detail from chat history or browsing when it fits the subtype.",
+    "- Name a specific viewed product when the subtype is compare, inform, social, or resume.",
+    "- Never re-suggest items already in the cart.",
+    "- Do not repeat phrasing from prior interjection messages in this conversation.",
+    "- Stay under 30 words.",
+  ].filter(Boolean);
+
+  return lines.join("\n");
 }
 
 export function isInterjectionDismissed(storageKey: string): boolean {

@@ -31,7 +31,7 @@ const productCardSchema = z.object({
 });
 
 const catalogAgentResultSchema = z.object({
-  products: z.array(productCardSchema).max(6),
+  products: z.array(productCardSchema).max(4),
 });
 
 export function createProductSearchTool(input: {
@@ -53,7 +53,7 @@ export function createProductSearchTool(input: {
         .number()
         .int()
         .min(1)
-        .max(6)
+        .max(4)
         .optional()
         .describe("Maximum number of product cards to return."),
     }),
@@ -66,7 +66,7 @@ export function createProductSearchTool(input: {
         };
       }
 
-      const resultLimit = Math.min(Math.max(maxResults ?? 4, 1), 6);
+      const resultLimit = Math.min(Math.max(maxResults ?? 4, 1), 4);
       const trimmedQuery = query.trim();
 
       if (!trimmedQuery) {

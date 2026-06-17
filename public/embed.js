@@ -819,13 +819,12 @@
           iframe.setAttribute("style", getFrameStyle(false, renderReady));
           safeSet(scopedStorageKey(STORAGE.WIDGET_OPEN), "0");
           chatIsOpen = false;
-          // Option A: restart the State 3 schedule from the close moment.
-          // The user explicitly closed — don't pop open again right away
-          // just because the session has already been long enough to meet
-          // a threshold. Next interjection waits from "now" under the same
-          // escalating cadence (1m / 3m / 8m for counts 0 / 1 / 2).
+          // Restart the State 3 schedule from the close moment with a fresh
+          // quiet period and threshold ladder (1m / 3m / 8m).
           sessionStartedAt = Date.now();
           setSessionVal(scopedSessionKey("started_at"), String(sessionStartedAt));
+          setSessionVal(scopedSessionKey("state3_count"), "0");
+          delayState3Until = Date.now() + STATE3_THRESHOLDS[0];
           startState3();
           break;
 
@@ -1013,15 +1012,18 @@
     });
 
     // ── State 3 scheduler (BROWSING_CHAT_CLOSED) ──────────────────────
-    // First 3 interjections at 20s / 40s / 60s from the "clock baseline"
-    // (which is either session start or the moment the chat was closed/
-    // minimized). After that, no cap — fire every 2 minutes measured
-    // from the last interjection.
-    var STATE3_THRESHOLDS = [20_000, 40_000, 60_000];
-    var STATE3_RECURRING_GAP_MS = 120_000; // 2 min after the 3rd
-    var STATE3_CHECK_INTERVAL = 5_000;     // tighter so 20s is accurate
-    var STATE3_NAV_GUARD_MS = 8_000;
+    // First 3 interjections at 1m / 3m / 8m from the clock baseline
+    // (session start or chat minimize). After that, every 8 minutes.
+    var STATE3_THRESHOLDS = [60_000, 180_000, 480_000];
+    var STATE3_RECURRING_GAP_MS = 480_000;
+    var STATE3_CHECK_INTERVAL = 10_000;
+    var STATE3_NAV_GUARD_MS = 15_000;
     var STATE3_LAST_INTERJECTION_KEY = scopedSessionKey("last_interjection_at");
+    var STATE3_TYPES_USED_KEY = scopedSessionKey("interjection_types_used");
+    var STATE3_DELAY_AFTER_GREETING_MS = 90_000;
+    var delayState3Until = isNewSession
+      ? Date.now() + STATE3_DELAY_AFTER_GREETING_MS
+      : Date.now();
 
     function getLastInterjectionAt() {
       return parseInt(getSessionVal(STATE3_LAST_INTERJECTION_KEY) || "0", 10);
@@ -1033,23 +1035,51 @@
     var chatIsOpen = safeGet(scopedStorageKey(STORAGE.WIDGET_OPEN)) === "1";
     var state3Interval = null;
 
-    // Heuristic: which interjection type fits the current browsing/chat state?
-    function pickInterjectionType() {
+    function getUsedInterjectionTypes() {
+      try {
+        var raw = getSessionVal(STATE3_TYPES_USED_KEY);
+        if (!raw) return [];
+        var parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function recordUsedInterjectionType(type) {
+      var used = getUsedInterjectionTypes();
+      if (used.indexOf(type) === -1) used.push(type);
+      if (used.length > 5) used = used.slice(-5);
+      setSessionVal(STATE3_TYPES_USED_KEY, JSON.stringify(used));
+    }
+
+    function rankInterjectionTypes() {
       var chatMessages = safeJSON(safeGet(scopedStorageKey(STORAGE.CHAT))) || [];
       var userMsgs = chatMessages.filter(function (m) { return m && m.role === "user"; });
       var productsViewed = getBrowsingHistory().length;
       var isPdp = pageContext && pageContext.page === "pdp" && pageContext.productName;
+      var ranked = [];
 
-      // Rich prior chat → resume
-      if (userMsgs.length >= 2) return "resume";
-      // On a PDP right now → inform
-      if (isPdp) return "inform";
-      // 2+ products viewed in this session → compare
-      if (productsViewed >= 2) return "compare";
-      // 1 product viewed (near-decision) → social proof
-      if (productsViewed === 1) return "social";
-      // Default → guide (quiz-style narrowing)
-      return "guide";
+      if (userMsgs.length >= 2) ranked.push("resume");
+      if (isPdp) ranked.push("inform");
+      if (productsViewed >= 2) ranked.push("compare");
+      if (productsViewed === 1) ranked.push("social");
+      ranked.push("guide");
+
+      return ranked.filter(function (type, index) {
+        return ranked.indexOf(type) === index;
+      });
+    }
+
+    // Pick the best subtype for this moment, rotating away from types already
+    // used this session so back-to-back interjections feel coherent.
+    function pickInterjectionType() {
+      var ranked = rankInterjectionTypes();
+      var used = getUsedInterjectionTypes();
+      for (var i = 0; i < ranked.length; i++) {
+        if (used.indexOf(ranked[i]) === -1) return ranked[i];
+      }
+      return ranked[0] || "guide";
     }
 
     // Hard rule: NEVER interrupt cart/checkout flows. We check both the
@@ -1106,14 +1136,14 @@
 
     function checkState3() {
       if (chatIsOpen || !ready) return;
+      if (nowBeforeState3()) return;
       if (!isSafePageForInterjection()) return; // Skip cart/checkout
       if (isProactiveBudgetSpent()) return;
       var count = getState3Count();
       var now = Date.now();
 
       // For the first three interjections, use the absolute-from-baseline
-      // threshold (20s, 40s, 60s). After that, require 2 minutes to have
-      // passed since the PREVIOUS interjection (relative pacing). No cap.
+      // threshold (1m, 3m, 8m). After that, wait 8m since the last one.
       if (count < STATE3_THRESHOLDS.length) {
         var elapsed = now - sessionStartedAt;
         if (elapsed < STATE3_THRESHOLDS[count]) return;
@@ -1123,12 +1153,18 @@
       }
       // Guard: don't interrupt right after a navigation
       if (now - lastNavAt < STATE3_NAV_GUARD_MS) return;
+      var interjectionType = pickInterjectionType();
       incState3Count();
       setLastInterjectionAt(now);
+      recordUsedInterjectionType(interjectionType);
       sendToIframe({
         type: "shop-assist-interjection",
-        interjectionType: pickInterjectionType(),
+        interjectionType: interjectionType,
       });
+    }
+
+    function nowBeforeState3() {
+      return Date.now() < delayState3Until;
     }
     function startState3() {
       if (state3Interval || chatIsOpen) return;

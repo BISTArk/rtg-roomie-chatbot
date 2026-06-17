@@ -1,4 +1,5 @@
 const DEFAULT_NAMESPACE = "shop-assist-demo";
+const SESSION_STATE_PREFIX = "shop_assist_session";
 
 let storageNamespace = DEFAULT_NAMESPACE;
 
@@ -17,6 +18,11 @@ export function getStorageNamespace(): string {
 
 export function getScopedStorageKey(baseKey: string): string {
   return `${storageNamespace}:${baseKey}`;
+}
+
+/** Matches embed.js scopedSessionKey — sessionStorage keys for per-tab state. */
+export function getScopedSessionKey(baseKey: string): string {
+  return `${SESSION_STATE_PREFIX}:${storageNamespace}:${baseKey}`;
 }
 
 function uid(): string {

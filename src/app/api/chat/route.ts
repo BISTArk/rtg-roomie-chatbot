@@ -19,7 +19,10 @@ import {
 import {
   buildCatalogPlaceholder,
 } from "@/lib/catalog-retrieval";
-import { stripUnresolvedToolParts } from "@/lib/message-tools";
+import {
+  buildInterjectionTriggerPrompt,
+  type InterjectionType,
+} from "@/lib/interjection";
 import { isComplaintMessage } from "@/lib/complaint-detection";
 import { getWelcomeMessage } from "@/lib/widget-config";
 import type { WidgetBranding } from "@/lib/widget-config";
@@ -31,9 +34,10 @@ import {
   MODEL_MAP,
 } from "@/lib/models";
 import type { CatalogDataset, TenantSkillPrompts } from "@/lib/platform-types";
+import { stripUnresolvedToolParts } from "@/lib/message-tools";
 
 // Vercel Fluid Compute defaults: Hobby 300s max, Pro/Enterprise up to 800s (1800s extended beta).
-// Chat turns can include gpt-5.5 reasoning + product_search (nested LLM over full catalog).
+// Chat turns can include Gemini 3 Flash + product_search (nested LLM over full catalog).
 export const maxDuration = 300;
 
 type CompareRequest = {
@@ -619,12 +623,23 @@ export async function POST(request: Request) {
     if (type === "interjection" && interjectionType) {
       console.log("[chat route] → interjection path, subtype:", interjectionType);
       logCatalogContext(activeCatalogDataset, catalogData);
+      const interjectionPageContext: PageContext | undefined = pageContext
+        ? {
+            ...pageContext,
+            browsingHistory:
+              browsingHistory ??
+              pageContext.browsingHistory ??
+              undefined,
+          }
+        : browsingHistory?.length
+          ? { page: "unknown", browsingHistory }
+          : undefined;
       const systemPrompt = buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "interjection" }],
         visitorProfile: visitorProfile ?? undefined,
-        pageContext: pageContext ?? undefined,
+        pageContext: interjectionPageContext,
         customerLocation,
         interjectionType,
       });
@@ -639,7 +654,7 @@ export async function POST(request: Request) {
         modelKey,
         modelId,
         inputMessageCount: messages.length,
-        tools: makeChatTools(),
+        withTools: false,
         streamArgs: {
           model: chatModel,
           system: systemPrompt,
@@ -647,13 +662,13 @@ export async function POST(request: Request) {
             ...modelMessages,
             {
               role: "user",
-              content: `Generate an interjection of type "${interjectionType}" NOW, following the interjection skill's "${interjectionType}" sub-template. The customer has been browsing with the chat closed.
-
-IMPORTANT context to weave in:
-- Scan the full chat history above for prior preferences, questions, or pain points the customer mentioned (sleep position, temperature, budget, back pain, partner, etc.). Reference one concrete detail if present.
-- Scan the BROWSING HISTORY section of your system prompt for specific products the customer has viewed during this session. Name the most-relevant one explicitly if it fits the interjection type (especially "compare", "inform", "social", "resume").
-- Scan the SHOPIFY CART STATUS section for what's already in the cart. NEVER re-suggest what they already have.
-- Avoid repeating any category or phrasing you've used in a prior interjection message in this conversation.`,
+              content: buildInterjectionTriggerPrompt({
+                interjectionType: interjectionType as InterjectionType,
+                pageContext: interjectionPageContext,
+                browsingHistory:
+                  browsingHistory ??
+                  interjectionPageContext?.browsingHistory,
+              }),
             },
           ],
         },

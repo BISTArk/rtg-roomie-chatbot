@@ -91,6 +91,11 @@ import {
   messageNeedsPeekSuggestions,
   pickInterjectionType,
   STANDALONE_INTERJECTION_DELAY_MS,
+  INTERJECTION_COOLDOWN_AFTER_PEEK_MS,
+  getInterjectionTypesUsedStorageKey,
+  readUsedInterjectionTypes,
+  recordUsedInterjectionType,
+  getInterjectionTypeFromMessage,
   type InterjectionType,
 } from "@/lib/interjection";
 import type { SuggestionsContext } from "@/lib/suggestions";
@@ -296,12 +301,13 @@ async function syncSessionToDb(input: {
 export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [showInterjection, setShowInterjection] = useState(false);
+  const [launcherAttention, setLauncherAttention] = useState(false);
   const [interjectionContent, setInterjectionContent] =
     useState<ProactivePeekContent | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string>("");
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
-  const selectedModel = "gpt-5.5";
+  const selectedModel = "gemini-flash-3";
   const initialTenantKey = getRuntimeTenantKey();
   const [widgetConfig, setWidgetConfig] = useState(() =>
     resolveWidgetConfig(getWindowChatConfig())
@@ -372,6 +378,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const isOpenRef = useRef(isOpen);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const interjectionRef = useRef<HTMLDivElement>(null);
+  const lastProactiveFireRef = useRef<{
+    at: number;
+    kind: ProactiveReason;
+  } | null>(null);
   const proactivePeekRef = useRef<ProactivePeekContent | null>(null);
   // Durable flag: set when user clicks the in-chat refresh icon. Blocks
   // returning-style greetings until they actually send a message. Storage is
@@ -497,10 +507,15 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, [showHistory, sessionId, refreshHistorySessions]);
 
   useEffect(() => {
+    setLauncherAttention(Boolean(showInterjection && interjectionContent?.prose && !isOpen));
+  }, [showInterjection, interjectionContent?.prose, isOpen]);
+
+  useEffect(() => {
     isOpenRef.current = isOpen;
     if (isOpen) {
       setShowInterjection(false);
       setInterjectionContent(null);
+      setLauncherAttention(false);
     }
     // Tell embed.js to resize the iframe
     if (embed && typeof window !== "undefined" && window.parent !== window) {
@@ -1240,7 +1255,11 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, []);
 
   const presentProactivePeekWithSuggestions = useCallback(
-    (message: UIMessage, proactiveSuggestions: string[]) => {
+    (
+      message: UIMessage,
+      proactiveSuggestions: string[],
+      interjectionType?: InterjectionType
+    ) => {
       let suggestionsForPeek = proactiveSuggestions
         .map((entry) => String(entry || "").trim())
         .filter(Boolean);
@@ -1250,18 +1269,20 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         return;
       }
 
+      const resolvedInterjectionType =
+        interjectionType ??
+        getInterjectionTypeFromMessage(message) ??
+        pickInterjectionType({
+          pageContext: pageContextRef.current,
+          messages: messagesRef.current,
+          browsingHistory: browsingHistoryRef.current,
+          usedTypes: readUsedInterjectionTypes(getInterjectionTypesUsedStorageKey()),
+        });
+
       if (suggestionsForPeek.length === 0 && messageNeedsPeekSuggestions(message)) {
-        suggestionsForPeek =
-          isNewSessionMessage(message)
-            ? getProactiveSuggestionFallbacks("new-session")
-            : getProactiveSuggestionFallbacks(
-                "interjection",
-                pickInterjectionType({
-                  pageContext: pageContextRef.current,
-                  messages: messagesRef.current,
-                  browsingHistory: browsingHistoryRef.current,
-                })
-              );
+        suggestionsForPeek = isNewSessionMessage(message)
+          ? getProactiveSuggestionFallbacks("new-session")
+          : getProactiveSuggestionFallbacks("interjection", resolvedInterjectionType);
       }
 
       if (suggestionsForPeek.length === 0) {
@@ -1383,12 +1404,20 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       return {
         mode: "interjection",
-        interjectionType: pickInterjectionType({
-          pageContext: pageContextRef.current,
-          messages: messagesRef.current,
-          browsingHistory: browsingHistoryRef.current,
-        }),
+        interjectionType:
+          getInterjectionTypeFromMessage(message) ??
+          pickInterjectionType({
+            pageContext: pageContextRef.current,
+            messages: messagesRef.current,
+            browsingHistory: browsingHistoryRef.current,
+            usedTypes: readUsedInterjectionTypes(getInterjectionTypesUsedStorageKey()),
+          }),
         assistantMessage: getAssistantMessageText(message),
+        pageContext: pageContextRef.current ?? undefined,
+        browsingHistory:
+          browsingHistoryRef.current.length > 0
+            ? browsingHistoryRef.current
+            : undefined,
       };
     },
     []
@@ -1520,7 +1549,10 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         console.log(`[proactive] ${which} skipped: ${result.reason}`);
         return false;
       }
-      if (mark) proactive.markFired();
+      if (mark) {
+        proactive.markFired();
+        lastProactiveFireRef.current = { at: Date.now(), kind: which };
+      }
       return true;
     },
     [proactive, messages]
@@ -1608,14 +1640,46 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
   // State 3: Fire an interjection. Subtype selects the sub-template.
   const triggerInterjection = useCallback(async (interjectionType: string) => {
+    const lastPeek = lastProactiveFireRef.current;
+    if (
+      lastPeek &&
+      Date.now() - lastPeek.at < INTERJECTION_COOLDOWN_AFTER_PEEK_MS &&
+      (lastPeek.kind === "new-session" || lastPeek.kind === "contextual")
+    ) {
+      console.log("[proactive] interjection skipped: recent peek message");
+      return;
+    }
+
     if (!gatedFire("interjection")) return;
     const typedInterjection = interjectionType as InterjectionType;
+    const usedTypesKey = getInterjectionTypesUsedStorageKey();
+    recordUsedInterjectionType(usedTypesKey, typedInterjection);
+
     try {
+      const mergedPageContext = pageContextRef.current
+        ? {
+            ...pageContextRef.current,
+            browsingHistory:
+              browsingHistoryRef.current.length > 0
+                ? browsingHistoryRef.current
+                : pageContextRef.current.browsingHistory,
+          }
+        : browsingHistoryRef.current.length > 0
+          ? {
+              page: "unknown" as const,
+              browsingHistory: browsingHistoryRef.current,
+            }
+          : undefined;
+
       requestExtrasRef.current = {
         type: "interjection",
         interjectionType: typedInterjection,
         visitorProfile: visitorProfileRef.current ?? undefined,
-        pageContext: pageContextRef.current,
+        pageContext: mergedPageContext,
+        browsingHistory:
+          browsingHistoryRef.current.length > 0
+            ? browsingHistoryRef.current
+            : undefined,
       };
       const chunkStream = await transport.sendMessages({
         trigger: "submit-message",
@@ -1629,7 +1693,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
       const storedMessage: UIMessage = {
         ...interjection,
-        id: createInterjectionMessageId(interjection.id),
+        id: createInterjectionMessageId(interjection.id, typedInterjection),
       };
       const candidateMessages = [
         ...messagesRef.current.filter((entry) => !isTransientProactiveMessage(entry)),
@@ -1642,13 +1706,29 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         mode: "interjection",
         interjectionType: typedInterjection,
         assistantMessage: prose,
+        pageContext: mergedPageContext,
+        browsingHistory:
+          browsingHistoryRef.current.length > 0
+            ? browsingHistoryRef.current
+            : undefined,
       });
 
-      presentProactivePeekWithSuggestions(storedMessage, interjectionSuggestions);
+      presentProactivePeekWithSuggestions(
+        storedMessage,
+        interjectionSuggestions,
+        typedInterjection
+      );
     } catch {
       /* swallow */
     }
-  }, [transport, messages, gatedFire, readAssistantStream, loadProactiveSuggestions, presentProactivePeekWithSuggestions]);
+  }, [
+    transport,
+    messages,
+    gatedFire,
+    readAssistantStream,
+    loadProactiveSuggestions,
+    presentProactivePeekWithSuggestions,
+  ]);
 
   // State 4: Greet on fresh session. For returning customers with prior chat
   // history, the greeting is APPENDED (history stays). For new customers with
@@ -1771,11 +1851,14 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
 
     const timer = window.setTimeout(() => {
       if (isOpenRef.current) return;
+      const usedTypesKey = getInterjectionTypesUsedStorageKey();
       const type = pickInterjectionType({
         pageContext: pageContextRef.current,
         messages: messagesRef.current,
         browsingHistory: browsingHistoryRef.current,
+        usedTypes: readUsedInterjectionTypes(usedTypesKey),
       });
+      recordUsedInterjectionType(usedTypesKey, type);
       void triggerInterjectionRef.current?.(type);
     }, STANDALONE_INTERJECTION_DELAY_MS);
 
@@ -2151,20 +2234,36 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           <button
             ref={launcherRef}
             onClick={handleOpen}
-            className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-transform hover:scale-[1.03] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${embed ? embedLauncherClass : launcherPositionClass} ${embed ? "pointer-events-auto max-w-[calc(100%-16px)]" : ""}`}
+            className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-[transform,box-shadow,border-color] duration-300 hover:scale-[1.05] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${embed ? embedLauncherClass : launcherPositionClass} ${embed ? "pointer-events-auto max-w-[calc(100%-16px)]" : ""} ${launcherAttention ? "launcher-attention border-2" : ""}`}
             style={{
               backgroundColor: "var(--widget-surface)",
               color: "var(--widget-text)",
-              border: "1px solid var(--widget-border)",
-              boxShadow: "var(--widget-shadow)",
+              borderColor: launcherAttention ? "var(--widget-accent)" : "var(--widget-border)",
+              boxShadow: launcherAttention
+                ? "var(--widget-shadow), 0 8px 28px color-mix(in srgb, var(--widget-accent) 28%, transparent)"
+                : "var(--widget-shadow)",
             }}
             aria-label={`Open ${widgetConfig.branding.launcherLabel}`}
           >
-            <WidgetAvatar
-              size={32}
-              branding={widgetConfig.branding}
-              theme={widgetConfig.theme}
-            />
+            <span className="relative shrink-0">
+              <WidgetAvatar
+                size={32}
+                branding={widgetConfig.branding}
+                theme={widgetConfig.theme}
+              />
+              {launcherAttention ? (
+                <span
+                  aria-hidden
+                  className="launcher-attention-badge absolute -right-0.5 -top-0.5 flex h-3 w-3 items-center justify-center rounded-full"
+                  style={{ backgroundColor: "var(--widget-accent)" }}
+                >
+                  <span
+                    className="block h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: "var(--widget-accent-text)" }}
+                  />
+                </span>
+              ) : null}
+            </span>
             <span
               className="text-sm font-semibold"
               style={{ color: "var(--widget-text)" }}
