@@ -32,7 +32,9 @@ import {
 } from "@/lib/models";
 import type { CatalogDataset, TenantSkillPrompts } from "@/lib/platform-types";
 
-export const maxDuration = 60;
+// Vercel Fluid Compute defaults: Hobby 300s max, Pro/Enterprise up to 800s (1800s extended beta).
+// Chat turns can include gpt-5.5 reasoning + product_search (nested LLM over full catalog).
+export const maxDuration = 300;
 
 type CompareRequest = {
   shopperGoal?: string;
@@ -305,6 +307,28 @@ async function resolveCatalogForRequest(input: {
   return { catalogData };
 }
 
+function logCatalogContext(
+  activeCatalogDataset: CatalogDataset | null,
+  retrieval: { catalogData: string; accessoryData?: string }
+) {
+  const activeRows = activeCatalogDataset?.rows.length ?? 0;
+  const activeFullTextLen =
+    activeCatalogDataset?.fullCatalogText?.length ??
+    (activeRows > 0 ? "(rows only, no cached full_catalog_text)" : 0);
+  console.log(
+    "[chat route] system catalog placeholder:",
+    retrieval.catalogData.length,
+    "chars | active catalog:",
+    activeRows,
+    "rows,",
+    activeFullTextLen,
+    "chars full_catalog_text"
+  );
+  if (retrieval.accessoryData !== undefined) {
+    console.log("[chat route] accessory prompt length:", retrieval.accessoryData.length, "chars");
+  }
+}
+
 export async function POST(request: Request) {
   console.log("[chat route] ── POST handler entered ──");
 
@@ -387,7 +411,7 @@ export async function POST(request: Request) {
   console.log("[chat route] openrouter client created");
   const chatModel = openrouter.chat(modelId, {
     reasoning: {
-      effort: "medium",
+      effort: "low",
       exclude: true,
     },
   });
@@ -437,7 +461,7 @@ export async function POST(request: Request) {
         type,
         pageContext: pageContext ?? undefined,
       });
-      console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
+      logCatalogContext(activeCatalogDataset, retrieval);
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
@@ -484,7 +508,7 @@ export async function POST(request: Request) {
         type,
         pageContext: pageContext ?? undefined,
       });
-      console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
+      logCatalogContext(activeCatalogDataset, retrieval);
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
@@ -530,7 +554,7 @@ export async function POST(request: Request) {
         type,
         pageContext,
       });
-      console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
+      logCatalogContext(activeCatalogDataset, retrieval);
       if (blockForMissingCatalog("contextual", activeCatalogDataset)) {
         console.warn("[chat route] blocking contextual response because tenant catalog is missing");
         if (sessionId) {
@@ -591,7 +615,7 @@ export async function POST(request: Request) {
         type,
         pageContext: pageContext ?? undefined,
       });
-      console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
+      logCatalogContext(activeCatalogDataset, retrieval);
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
@@ -638,7 +662,7 @@ export async function POST(request: Request) {
         type,
         pageContext: pageContext ?? undefined,
       });
-      console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
+      logCatalogContext(activeCatalogDataset, retrieval);
       const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
@@ -689,8 +713,7 @@ IMPORTANT context to weave in:
         type,
         pageContext: pageContext ?? undefined,
       });
-      console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-      console.log("[chat route] accessory prompt length:", retrieval.accessoryData?.length ?? 0, "chars");
+      logCatalogContext(activeCatalogDataset, retrieval);
       if (blockForMissingCatalog("upsell", activeCatalogDataset)) {
         console.warn("[chat route] blocking upsell response because tenant catalog is missing");
         if (sessionId) {
@@ -765,8 +788,7 @@ IMPORTANT context to weave in:
       type,
       pageContext: pageContext ?? undefined,
     });
-    console.log("[chat route] catalog prompt length:", retrieval.catalogData.length, "chars");
-    console.log("[chat route] accessory prompt length:", retrieval.accessoryData?.length ?? 0, "chars");
+    logCatalogContext(activeCatalogDataset, retrieval);
 
     const systemPrompt = [
       buildSystemPrompt(retrieval.catalogData, {
