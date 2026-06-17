@@ -288,7 +288,6 @@ export function buildSystemPrompt(
     preloadedSkills?: PreloadedSkill[];
     pageContext?: PageContext;
     visitorProfile?: VisitorProfile;
-    accessoryData?: string;
     interjectionType?: string;
     customerLocation?: CustomerLocation;
     complaintHint?: boolean;
@@ -320,15 +319,11 @@ export function buildSystemPrompt(
     options?.visitorProfile
   );
 
-  const accessoryBlock = options?.accessoryData
-    ? `\n\n---\n\n${options.accessoryData}`
-    : "";
-
   const interjectionBlock = options?.interjectionType
     ? `\n\n---\n\n# INTERJECTION TYPE\n\nUse the "${options.interjectionType}" sub-template from the skill above.`
     : "";
 
   const locationBlock = buildCustomerLocationBlock(options?.customerLocation);
 
-  return `${base}${skillSection}${complaintHint}${contextNarrative}${accessoryBlock}${interjectionBlock}${locationBlock}\n\n---\n\n${UI_INSTRUCTIONS}`;
+  return `${base}${skillSection}${complaintHint}${contextNarrative}${interjectionBlock}${locationBlock}\n\n---\n\n${UI_INSTRUCTIONS}`;
 }

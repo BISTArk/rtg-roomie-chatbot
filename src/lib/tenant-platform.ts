@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import type { PoolClient } from "pg";
 import { DEFAULT_WIDGET_BRANDING, DEFAULT_WIDGET_THEME, SHOP_ASSIST_WIDGET_BRANDING, SHOP_ASSIST_WIDGET_THEME } from "@/lib/widget-config";
-import { buildAccessoryCatalog, buildFullCatalogSnapshot } from "@/lib/tenant-catalog";
+import { buildFullCatalogSnapshot } from "@/lib/tenant-catalog";
 import { ensurePlatformSchema, hasDatabase, withDb } from "@/lib/db";
 import { createTenantToken, normalizeHostname, normalizeOrigin, verifyTenantToken } from "@/lib/platform-security";
 import { normalizeShopifyShopDomain } from "@/lib/shopify";
@@ -2285,27 +2285,4 @@ export async function getTenantDebugSnapshot(tenantId: string): Promise<{
       })),
     };
   });
-}
-
-export async function buildTenantCatalogContext(tenantId: string, cartItems?: string[] | null): Promise<{
-  catalogData: string;
-  accessoryData?: string;
-}> {
-  if (!hasDatabase()) {
-    return {
-      catalogData: "# RETRIEVED CATALOG CONTEXT\n\n(database not configured)\n\n## CATALOG DATA\n\n(none)",
-    };
-  }
-
-  const dataset = await getActiveCatalogDataset(tenantId);
-  if (!dataset) {
-    return {
-      catalogData: "# RETRIEVED CATALOG CONTEXT\n\n(no active tenant catalog snapshot)\n\n## CATALOG DATA\n\n(none)",
-    };
-  }
-
-  return {
-    catalogData: dataset.fullCatalogText || buildFullCatalogSnapshot(dataset),
-    accessoryData: buildAccessoryCatalog(dataset.rows, cartItems),
-  };
 }

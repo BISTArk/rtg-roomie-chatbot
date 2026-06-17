@@ -23,7 +23,7 @@ import { stripUnresolvedToolParts } from "@/lib/message-tools";
 import { isComplaintMessage } from "@/lib/complaint-detection";
 import { getWelcomeMessage } from "@/lib/widget-config";
 import type { WidgetBranding } from "@/lib/widget-config";
-import { buildTenantCatalogContext, getActiveCatalogDataset, recordConversationAnalytics, resolveTenantFromToken } from "@/lib/tenant-platform";
+import { getActiveCatalogDataset, recordConversationAnalytics, resolveTenantFromToken } from "@/lib/tenant-platform";
 import { isPgDeadlockError } from "@/lib/db";
 import { createChatTools } from "@/tools";
 import {
@@ -290,26 +290,9 @@ function buildTrackedStreamResponse(input: {
   });
 }
 
-async function resolveCatalogForRequest(input: {
-  tenantId: string;
-  type?: ChatRequestBody["type"];
-  pageContext?: PageContext;
-}) {
-  const catalogData = buildCatalogPlaceholder(CATALOG_AGENT_NOTE);
-
-  if (input.type === "upsell") {
-    return {
-      catalogData,
-      accessoryData: (await buildTenantCatalogContext(input.tenantId, input.pageContext?.cartItems)).accessoryData,
-    };
-  }
-
-  return { catalogData };
-}
-
 function logCatalogContext(
   activeCatalogDataset: CatalogDataset | null,
-  retrieval: { catalogData: string; accessoryData?: string }
+  catalogData: string
 ) {
   const activeRows = activeCatalogDataset?.rows.length ?? 0;
   const activeFullTextLen =
@@ -317,16 +300,13 @@ function logCatalogContext(
     (activeRows > 0 ? "(rows only, no cached full_catalog_text)" : 0);
   console.log(
     "[chat route] system catalog placeholder:",
-    retrieval.catalogData.length,
+    catalogData.length,
     "chars | active catalog:",
     activeRows,
     "rows,",
     activeFullTextLen,
     "chars full_catalog_text"
   );
-  if (retrieval.accessoryData !== undefined) {
-    console.log("[chat route] accessory prompt length:", retrieval.accessoryData.length, "chars");
-  }
 }
 
 export async function POST(request: Request) {
@@ -417,6 +397,7 @@ export async function POST(request: Request) {
   });
   console.log("[chat route] tenant:", tenant.tenantKey, tenant.tenantId);
   const activeCatalogDataset = await getActiveCatalogDataset(tenant.tenantId);
+  const catalogData = buildCatalogPlaceholder(CATALOG_AGENT_NOTE);
   const makeChatTools = () =>
     createRequestChatTools({
       catalogDataset: activeCatalogDataset,
@@ -456,13 +437,8 @@ export async function POST(request: Request) {
 
     if (type === "returning" && visitorProfile) {
       console.log("[chat route] → returning path");
-      const retrieval = await resolveCatalogForRequest({
-        tenantId: tenant.tenantId,
-        type,
-        pageContext: pageContext ?? undefined,
-      });
-      logCatalogContext(activeCatalogDataset, retrieval);
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
+      logCatalogContext(activeCatalogDataset, catalogData);
+      const systemPrompt = buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "returning" }],
@@ -503,13 +479,8 @@ export async function POST(request: Request) {
     // summary, plus the reengagement skill for phrasing.
     if (type === "reengagement") {
       console.log("[chat route] → reengagement path");
-      const retrieval = await resolveCatalogForRequest({
-        tenantId: tenant.tenantId,
-        type,
-        pageContext: pageContext ?? undefined,
-      });
-      logCatalogContext(activeCatalogDataset, retrieval);
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
+      logCatalogContext(activeCatalogDataset, catalogData);
+      const systemPrompt = buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "reengagement" }],
@@ -549,12 +520,7 @@ export async function POST(request: Request) {
     // Two-line plain-text summary — no product cards or action tiles.
     if (type === "contextual" && pageContext) {
       console.log("[chat route] → contextual path, product:", pageContext.productName);
-      const retrieval = await resolveCatalogForRequest({
-        tenantId: tenant.tenantId,
-        type,
-        pageContext,
-      });
-      logCatalogContext(activeCatalogDataset, retrieval);
+      logCatalogContext(activeCatalogDataset, catalogData);
       if (blockForMissingCatalog("contextual", activeCatalogDataset)) {
         console.warn("[chat route] blocking contextual response because tenant catalog is missing");
         if (sessionId) {
@@ -573,7 +539,7 @@ export async function POST(request: Request) {
         }
         return createMissingCatalogResponse(messages);
       }
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
+      const systemPrompt = buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "contextual" }],
@@ -610,13 +576,8 @@ export async function POST(request: Request) {
     // new-session skill which is light — intro + stand by for user input.
     if (type === "new-session") {
       console.log("[chat route] → new-session path");
-      const retrieval = await resolveCatalogForRequest({
-        tenantId: tenant.tenantId,
-        type,
-        pageContext: pageContext ?? undefined,
-      });
-      logCatalogContext(activeCatalogDataset, retrieval);
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
+      logCatalogContext(activeCatalogDataset, catalogData);
+      const systemPrompt = buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "new-session" }],
@@ -657,13 +618,8 @@ export async function POST(request: Request) {
     // which sub-template to use (compare/inform/guide/social/resume).
     if (type === "interjection" && interjectionType) {
       console.log("[chat route] → interjection path, subtype:", interjectionType);
-      const retrieval = await resolveCatalogForRequest({
-        tenantId: tenant.tenantId,
-        type,
-        pageContext: pageContext ?? undefined,
-      });
-      logCatalogContext(activeCatalogDataset, retrieval);
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
+      logCatalogContext(activeCatalogDataset, catalogData);
+      const systemPrompt = buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "interjection" }],
@@ -704,16 +660,10 @@ IMPORTANT context to weave in:
       });
     }
 
-    // Post-Add-to-Cart cross-sell. Fires after a successful cart action.
-    // Uses the upsell skill — one short suggestion + tiles. Capped at 2
-    // invocations per session by the client.
+    // Post-Add-to-Cart cross-sell. Uses the upsell skill and product_search
+    // over the full catalog — no separate accessory catalog block.
     if (type === "upsell") {
-      const retrieval = await resolveCatalogForRequest({
-        tenantId: tenant.tenantId,
-        type,
-        pageContext: pageContext ?? undefined,
-      });
-      logCatalogContext(activeCatalogDataset, retrieval);
+      logCatalogContext(activeCatalogDataset, catalogData);
       if (blockForMissingCatalog("upsell", activeCatalogDataset)) {
         console.warn("[chat route] blocking upsell response because tenant catalog is missing");
         if (sessionId) {
@@ -732,14 +682,13 @@ IMPORTANT context to weave in:
         }
         return createMissingCatalogResponse(messages);
       }
-      const systemPrompt = buildSystemPrompt(retrieval.catalogData, {
+      const systemPrompt = buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "upsell" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
-        accessoryData: retrieval.accessoryData,
       });
       const sanitized = sanitizeForModel(messages, branding);
       const modelMessages = await convertToModelMessages(sanitized);
@@ -755,7 +704,7 @@ IMPORTANT context to weave in:
 
       // Also tell the AI to scan prior upsell messages in this conversation
       // and avoid repeating those categories.
-      const repeatLine = `\n\nScan your previous assistant upsell messages in this conversation. Follow the fixed category order: Lifestyle Base → Mattress Protector → Pillow → Sheets. If you've already suggested Lifestyle Base, move to Protector. If Protector, move to Pillow. If Pillow, move to Sheets. Never repeat the same category twice in the same session. If a category's catalog section is empty (notably SHEETS), skip it silently — never invent products.`;
+      const repeatLine = `\n\nScan your previous assistant upsell messages in this conversation. Follow the fixed category order: Lifestyle Base → Mattress Protector → Pillow → Sheets. If you've already suggested Lifestyle Base, move to Protector. If Protector, move to Pillow. If Pillow, move to Sheets. Never repeat the same category twice in the same session. Use product_search against the full catalog for each category — if a search returns no useful match, skip that category and try the next.`;
       return buildTrackedStreamResponse({
         tenantId: tenant.tenantId,
         sessionId,
@@ -773,7 +722,7 @@ IMPORTANT context to weave in:
             ...modelMessages,
             {
               role: "user",
-              content: `The customer just added ${pageContext?.productName || "a mattress"} to their cart. Generate ONE short cross-sell suggestion NOW, following the upsell skill. Pick the single best complementary item based on the chat history and current product.${exclusionLine}${repeatLine}`,
+              content: `The customer just added ${pageContext?.productName || "a mattress"} to their cart. Follow the upsell skill now: call product_search to find ONE real complementary accessory, then write a brief cross-sell line. Pick the single best category and product based on chat history and the mattress they added.${exclusionLine}${repeatLine}`,
             },
           ],
         },
@@ -783,22 +732,16 @@ IMPORTANT context to weave in:
     const lastUser = [...plainMessages].reverse().find((m) => m.role === "user");
     const userSaidComplaint = lastUser ? isComplaintMessage(lastUser.text) : false;
 
-    const retrieval = await resolveCatalogForRequest({
-      tenantId: tenant.tenantId,
-      type,
-      pageContext: pageContext ?? undefined,
-    });
-    logCatalogContext(activeCatalogDataset, retrieval);
+    logCatalogContext(activeCatalogDataset, catalogData);
 
     const systemPrompt = [
-      buildSystemPrompt(retrieval.catalogData, {
+      buildSystemPrompt(catalogData, {
         systemPrompt: tenant.systemPrompt,
         skillPrompts: tenant.skillPrompts,
         preloadedSkills: [{ name: "discovery" }, { name: "recommendation" }],
         visitorProfile: visitorProfile ?? undefined,
         pageContext: pageContext ?? undefined,
         customerLocation,
-        accessoryData: retrieval.accessoryData,
         complaintHint: userSaidComplaint,
       }),
       buildCompareRequestPrompt(compareRequest),
