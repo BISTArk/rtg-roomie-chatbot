@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock3, Heart, Minus, RefreshCw } from "lucide-react";
+import { Clock3, Heart, MessageCircle, Minus, RefreshCw } from "lucide-react";
 import { WidgetAvatar } from "./WidgetAvatar";
 import type { WidgetBranding, WidgetTheme } from "@/lib/widget-config";
 
@@ -12,6 +12,8 @@ export function ChatHeader({
   onToggleFavourites,
   isFavouritesOpen,
   favouriteCount,
+  onContinueWhatsApp,
+  showWhatsAppButton,
   branding,
   theme,
 }: {
@@ -22,6 +24,8 @@ export function ChatHeader({
   onToggleFavourites: () => void;
   isFavouritesOpen: boolean;
   favouriteCount: number;
+  onContinueWhatsApp?: () => void;
+  showWhatsAppButton?: boolean;
   branding: WidgetBranding;
   theme: WidgetTheme;
 }) {
@@ -44,6 +48,23 @@ export function ChatHeader({
       </div>
 
       <div className="flex items-center gap-1">
+        {showWhatsAppButton && onContinueWhatsApp ? (
+          <button
+            onClick={onContinueWhatsApp}
+            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
+            style={{ color: "var(--widget-success)" }}
+            aria-label={branding.whatsappButtonLabel}
+            title={branding.whatsappButtonLabel}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "transparent";
+            }}
+          >
+            <MessageCircle size={16} />
+          </button>
+        ) : null}
         <button
           onClick={onRefresh}
           className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"

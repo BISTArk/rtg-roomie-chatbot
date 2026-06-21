@@ -13,12 +13,15 @@
     "sync:embed:rtg": "node ./scripts/sync-theme-embed-url.mjs shopify.app.rtg.toml",
     "sync:embed:florida-mattress": "node ./scripts/sync-theme-embed-url.mjs shopify.app.florida-mattress.toml",
     "sync:embed:ai-shop-assist": "node ./scripts/sync-theme-embed-url.mjs shopify.app.ai-shop-assist.toml",
-    "deploy:main": "npm run sync:embed:main && shopify app deploy --config shopify.app.toml",
-    "deploy:rtg": "npm run sync:embed:rtg && shopify app deploy --config shopify.app.rtg.toml",
-    "deploy:florida-mattress": "npm run sync:embed:florida-mattress && shopify app deploy --config shopify.app.florida-mattress.toml",
-    "deploy:ai-shop-assist": "npm run sync:embed:ai-shop-assist && shopify app deploy --config shopify.app.ai-shop-assist.toml --allow-updates"
+    "deploy:main": "npm run sync:embed:main && npm run deploy -- --config shopify.app.toml --allow-updates",
+    "deploy:rtg": "npm run sync:embed:rtg && npm run deploy -- --config shopify.app.rtg.toml --allow-updates",
+    "deploy:florida-mattress": "npm run sync:embed:florida-mattress && npm run deploy -- --config shopify.app.florida-mattress.toml --allow-updates",
+    "deploy:ai-shop-assist": "npm run sync:embed:ai-shop-assist && npm run deploy -- --config shopify.app.ai-shop-assist.toml --allow-updates",
+    "deploy:all": "npm run deploy:main && npm run deploy:rtg && npm run deploy:florida-mattress && npm run deploy:ai-shop-assist"
   },
-  "dependencies": {},
+  "devDependencies": {
+    "@shopify/cli": "3.94.3"
+  },
   "trustedDependencies": [
     "@shopify/plugin-cloudflare"
   ],

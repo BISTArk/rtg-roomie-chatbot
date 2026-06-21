@@ -38,6 +38,11 @@ import {
   loadAiSdkSessionState,
   saveAiSdkSessionState,
 } from "@/lib/ai-sdk-sessions";
+import { getWhatsAppLinkBySession } from "@/lib/whatsapp-links";
+import {
+  getTwilioWhatsAppConfigStatus,
+  isTwilioWhatsAppConfigured,
+} from "@/lib/twilio-whatsapp";
 
 const DEFAULT_TENANT_KEY = "shop-assist-demo";
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1314,6 +1319,21 @@ export async function bootstrapTenantSession(input: {
     persisted.visitorProfile = localProfile;
   }
 
+  const whatsappLink = await getWhatsAppLinkBySession({
+    tenantId: tenant.tenantId,
+    clientSessionId: input.sessionId,
+  });
+
+  const twilioWhatsAppConfigured = isTwilioWhatsAppConfigured();
+  const twilioStatus = getTwilioWhatsAppConfigStatus();
+  console.log("[bootstrap][whatsapp]", {
+    tenantKey: tenant.tenantKey,
+    twilioWhatsAppConfigured,
+    twilioStatus,
+    tenantWhatsappEnabled: Boolean(tenant.prompt.whatsappEnabled),
+    sessionWhatsappLinked: Boolean(whatsappLink),
+  });
+
   return {
     tenant: {
       tenantId: tenant.tenantId,
@@ -1339,7 +1359,9 @@ export async function bootstrapTenantSession(input: {
       visitorProfile: persisted.visitorProfile,
       suggestions: persisted.suggestions ?? [],
       updatedAt: persisted.updatedAt,
+      whatsappLinked: Boolean(whatsappLink),
     },
+    twilioWhatsAppConfigured,
   };
 }
 
@@ -1615,7 +1637,7 @@ export async function updateTenantConfig(input: {
   });
 }
 
-async function resolveTenantById(tenantId: string): Promise<TenantRecord | null> {
+export async function resolveTenantById(tenantId: string): Promise<TenantRecord | null> {
   if (!hasDatabase()) return null;
   await ensurePlatformSchema();
   return withDb(async (client) => {

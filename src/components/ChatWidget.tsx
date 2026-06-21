@@ -18,6 +18,7 @@ import { ChatHistory } from "./ChatHistory";
 import { ChatMessages } from "./ChatMessages";
 import { ChatInput } from "./ChatInput";
 import { PrivacyNotice } from "./PrivacyNotice";
+import { WhatsAppContinueModal } from "./WhatsAppContinueModal";
 import { WidgetAvatar } from "./WidgetAvatar";
 import {
   saveMessages,
@@ -298,6 +299,48 @@ async function syncSessionToDb(input: {
   }
 }
 
+async function linkWhatsAppSession(input: {
+  tenantKey: string;
+  tenantToken: string;
+  sessionId: string;
+  hostOrigin: string;
+  phone: string;
+  consent: boolean;
+  messages: PersistedChatMessage[];
+  visitorProfile?: VisitorProfile | null;
+  suggestions?: string[];
+}) {
+  const response = await fetch("/api/whatsapp/link", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-tenant-token": input.tenantToken,
+    },
+    body: JSON.stringify({
+      tenantKey: input.tenantKey,
+      sessionId: input.sessionId,
+      hostOrigin: input.hostOrigin,
+      lastPageUrl: typeof window !== "undefined" ? window.location.href : undefined,
+      phone: input.phone,
+      consent: input.consent,
+      messages: input.messages,
+      visitorProfile: input.visitorProfile ?? null,
+      suggestions: input.suggestions ?? [],
+    }),
+  });
+
+  const payload = (await response.json()) as {
+    error?: string;
+    transferMessage?: PersistedChatMessage;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error || "Failed to link WhatsApp session.");
+  }
+
+  return payload;
+}
+
 export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [showInterjection, setShowInterjection] = useState(false);
@@ -321,6 +364,12 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [browsingHistory, setBrowsingHistory] = useState<BrowsingHistoryEntry[]>([]);
   const [humanMode, setHumanMode] = useState(false);
+  const [whatsappMode, setWhatsappMode] = useState(false);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(false);
+  const [twilioWhatsAppConfigured, setTwilioWhatsAppConfigured] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [whatsappSubmitting, setWhatsappSubmitting] = useState(false);
+  const [whatsappError, setWhatsappError] = useState("");
   const [historySessions, setHistorySessions] = useState<SessionHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isHistoryClosing, setIsHistoryClosing] = useState(false);
@@ -340,6 +389,32 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     () => buildWidgetThemeStyle(widgetConfig.theme),
     [widgetConfig.theme]
   );
+  const showWhatsAppFeature =
+    twilioWhatsAppConfigured && !whatsappMode && !humanMode;
+
+  useEffect(() => {
+    if (!loaded) return;
+    console.log("[widget][whatsapp]", {
+      twilioWhatsAppConfigured,
+      whatsappEnabled,
+      whatsappMode,
+      humanMode,
+      showWhatsAppFeature,
+      hint:
+        !twilioWhatsAppConfigured
+          ? "Twilio env vars missing on the server handling /api/widget/bootstrap."
+          : whatsappMode || humanMode
+            ? "Chat is already handed off."
+            : "Button should be visible.",
+    });
+  }, [
+    loaded,
+    twilioWhatsAppConfigured,
+    whatsappEnabled,
+    whatsappMode,
+    humanMode,
+    showWhatsAppFeature,
+  ]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -356,8 +431,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const panelPositionClass = isLeftPlacement
     ? "left-0 right-auto sm:left-4 sm:right-auto"
     : "right-0 left-auto sm:right-6 sm:left-auto";
-  const embedPanelClass =
-    "inset-x-0 bottom-0 w-full max-w-full sm:bottom-0 sm:w-full sm:max-w-full";
+  const embedPanelClass = "inset-0 h-full w-full max-h-full max-w-full";
   const embedLauncherClass = isLeftPlacement
     ? "left-2 right-auto sm:left-3"
     : "right-2 left-auto sm:right-3";
@@ -667,7 +741,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   const displayMessages: ChatMessage[] = messages.map(uiMessageToChatMessage);
 
   // ── Proactive guard: single gate for all spontaneous messages ──
-  const proactive = useProactiveGuard({ isStreaming, humanMode });
+  const proactive = useProactiveGuard({ isStreaming, humanMode: humanMode || whatsappMode });
 
   // Chat state tracking (observable for analytics; does not drive behavior)
   const [isNewSessionPhase, setIsNewSessionPhase] = useState(false);
@@ -739,6 +813,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
             }
           );
           setWidgetConfig(nextConfig);
+          setWhatsappEnabled(Boolean(bootstrap.tenant.prompt.whatsappEnabled));
+          setTwilioWhatsAppConfigured(Boolean(bootstrap.twilioWhatsAppConfigured));
+          setWhatsappMode(Boolean(bootstrap.session.whatsappLinked));
 
           initFromBridge(bootstrap.session.messages || data.chatMessages || null, true);
           initProactiveAttemptCount({
@@ -1028,6 +1105,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           windowConfig
         );
         setWidgetConfig(nextConfig);
+        setWhatsappEnabled(Boolean(bootstrap.tenant.prompt.whatsappEnabled));
+        setTwilioWhatsAppConfigured(Boolean(bootstrap.twilioWhatsAppConfigured));
+        setWhatsappMode(Boolean(bootstrap.session.whatsappLinked));
         initFromBridge(bootstrap.session.messages || null, false);
         initProactiveAttemptCount({ embed: false });
         initProfileFromBridge(bootstrap.session.visitorProfile || null, false);
@@ -1152,6 +1232,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       initFromBridge(bootstrap.session.messages || null, embed);
       initProfileFromBridge(bootstrap.session.visitorProfile || null, embed);
       setHumanMode(false);
+      setWhatsappMode(Boolean(bootstrap.session.whatsappLinked));
+      setWhatsappEnabled(Boolean(bootstrap.tenant.prompt.whatsappEnabled));
+      setTwilioWhatsAppConfigured(Boolean(bootstrap.twilioWhatsAppConfigured));
       messagesRef.current = restoredMessages;
       setMessages(restoredMessages);
       setSuggestions(bootstrap.session.suggestions ?? []);
@@ -1930,6 +2013,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     setSelectedProducts([]);
     setSuggestions([]);
     setHumanMode(false);
+    setWhatsappMode(false);
+    setShowWhatsAppModal(false);
+    setWhatsappError("");
     resetProactiveAttemptCount();
     sessionStartGreetingFiredRef.current = false;
     setSessionId(nextSessionId);
@@ -2007,9 +2093,74 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
     setHumanMode(true);
   }, [messages, transport, setMessages]);
 
+  const handleContinueWhatsApp = useCallback(() => {
+    if (!twilioWhatsAppConfigured || whatsappMode || humanMode || isStreaming || !tenantTokenRef.current) {
+      return;
+    }
+    setWhatsappError("");
+    setShowWhatsAppModal(true);
+  }, [humanMode, isStreaming, twilioWhatsAppConfigured, whatsappMode]);
+
+  const handleWhatsAppSubmit = useCallback(
+    async ({ phone, consent }: { phone: string; consent: boolean }) => {
+      if (!tenantKeyRef.current || !tenantTokenRef.current || !sessionIdRef.current) {
+        setWhatsappError("The assistant is still connecting. Please try again.");
+        return;
+      }
+
+      setWhatsappSubmitting(true);
+      setWhatsappError("");
+
+      try {
+        await syncSessionToDb({
+          tenantKey: tenantKeyRef.current,
+          tenantToken: tenantTokenRef.current,
+          sessionId: sessionIdRef.current,
+          hostOrigin: hostOriginRef.current,
+          messages: messagesRef.current.map(uiMessageToChatMessage),
+          visitorProfile: visitorProfileRef.current,
+          suggestions: suggestionsRef.current,
+        });
+
+        const result = await linkWhatsAppSession({
+          tenantKey: tenantKeyRef.current,
+          tenantToken: tenantTokenRef.current,
+          sessionId: sessionIdRef.current,
+          hostOrigin: hostOriginRef.current,
+          phone,
+          consent,
+          messages: messagesRef.current.map(uiMessageToChatMessage),
+          visitorProfile: visitorProfileRef.current,
+          suggestions: suggestionsRef.current,
+        });
+
+        if (result.transferMessage) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: result.transferMessage!.id,
+              role: "assistant",
+              parts: [{ type: "text", text: result.transferMessage!.text }],
+            },
+          ]);
+        }
+
+        setWhatsappMode(true);
+        setShowWhatsAppModal(false);
+      } catch (error) {
+        setWhatsappError(
+          error instanceof Error ? error.message : "Could not continue on WhatsApp."
+        );
+      } finally {
+        setWhatsappSubmitting(false);
+      }
+    },
+    [setMessages]
+  );
+
   const handleSend = useCallback(
     async (text: string) => {
-      if (!text.trim() || isStreaming || humanMode || !tenantTokenRef.current) return;
+      if (!text.trim() || isStreaming || humanMode || whatsappMode || !tenantTokenRef.current) return;
 
       recordPrivacyAcceptance({ embed });
 
@@ -2061,7 +2212,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       setSuggestions([]);
       await sendMessage({ text: text.trim() });
     },
-    [sendMessage, isStreaming, humanMode, triggerHandoff, setMessages, embed, proactive]
+    [sendMessage, isStreaming, humanMode, whatsappMode, triggerHandoff, setMessages, embed, proactive]
   );
 
   const sellerPrivacyPolicyUrl = getSellerPrivacyPolicyUrl(hostOrigin);
@@ -2097,7 +2248,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }, []);
 
   const compareSelectedProducts = useCallback(async () => {
-    if (selectedProducts.length < 2 || isStreaming || humanMode || !tenantTokenRef.current) {
+    if (selectedProducts.length < 2 || isStreaming || humanMode || whatsappMode || !tenantTokenRef.current) {
       return;
     }
 
@@ -2141,7 +2292,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         },
       }
     );
-  }, [embed, humanMode, isStreaming, proactive, selectedProducts, sendMessage]);
+  }, [embed, humanMode, whatsappMode, isStreaming, proactive, selectedProducts, sendMessage]);
 
   const selectedProductKeys = selectedProducts
     .map((product) => product.productKey || product.sku || product.title || "")
@@ -2168,7 +2319,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
   }
 
   return (
-    <div style={widgetThemeStyle}>
+    <div className={embed ? "h-full min-h-0" : undefined} style={widgetThemeStyle}>
       {/* Toggle button — Shopping Assistant pill */}
       {!isOpen && (
         <>
@@ -2285,9 +2436,9 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           />
 
           <div
-            className={`widget-enter fixed z-50 flex flex-col overflow-hidden shadow-2xl ${
+            className={`widget-enter fixed z-50 flex min-h-0 flex-col overflow-hidden shadow-2xl ${
               embed
-                ? `${embedPanelClass} h-full max-h-full rounded-none sm:rounded-none`
+                ? `${embedPanelClass} rounded-none sm:rounded-none`
                 : `bottom-0 h-[min(860px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[100vw] rounded-t-[28px] sm:bottom-6 sm:h-[800px] sm:w-[640px] sm:rounded-2xl lg:w-[720px] ${panelPositionClass}`
             } ${embed ? "pointer-events-auto" : ""}`}
             style={{
@@ -2308,6 +2459,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
               }
               isFavouritesOpen={showFavourites}
               favouriteCount={favourites.length}
+              showWhatsAppButton={showWhatsAppFeature}
+              onContinueWhatsApp={handleContinueWhatsApp}
               branding={widgetConfig.branding}
               theme={widgetConfig.theme}
             />
@@ -2356,7 +2509,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
                     </button>
                     <button
                       type="button"
-                      disabled={selectedProducts.length < 2 || isStreaming || humanMode}
+                      disabled={selectedProducts.length < 2 || isStreaming || humanMode || whatsappMode}
                       onClick={compareSelectedProducts}
                       className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--widget-accent)] px-3 text-sm font-semibold text-[var(--widget-accent-text)] transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -2368,15 +2521,46 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
               </div>
             ) : null}
 
+            {showWhatsAppFeature ? (
+              <div className="border-t border-[var(--widget-border)] bg-[var(--widget-surface)] px-4 py-2">
+                <button
+                  type="button"
+                  onClick={handleContinueWhatsApp}
+                  disabled={isStreaming || whatsappSubmitting || (loaded && !tenantToken)}
+                  className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-full border text-sm font-medium transition-colors hover:bg-[var(--widget-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{
+                    borderColor: "var(--widget-border)",
+                    color: "var(--widget-success)",
+                  }}
+                >
+                  {widgetConfig.branding.whatsappButtonLabel}
+                </button>
+              </div>
+            ) : null}
+
             <PrivacyNotice sellerPrivacyPolicyUrl={sellerPrivacyPolicyUrl} />
 
             <ChatInput
               onSend={handleSend}
-              disabled={isStreaming || humanMode || (loaded && !tenantToken)}
+              disabled={isStreaming || humanMode || whatsappMode || (loaded && !tenantToken)}
               isStreaming={isStreaming}
               humanMode={humanMode}
+              whatsappMode={whatsappMode}
               onAbort={stop}
               branding={widgetConfig.branding}
+            />
+
+            <WhatsAppContinueModal
+              open={showWhatsAppModal}
+              branding={widgetConfig.branding}
+              isSubmitting={whatsappSubmitting}
+              error={whatsappError}
+              onClose={() => {
+                if (whatsappSubmitting) return;
+                setShowWhatsAppModal(false);
+                setWhatsappError("");
+              }}
+              onSubmit={handleWhatsAppSubmit}
             />
 
             {isHistoryMounted && (

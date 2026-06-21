@@ -8,6 +8,7 @@ export function ChatInput({
   disabled,
   isStreaming,
   humanMode,
+  whatsappMode,
   onAbort,
   branding,
 }: {
@@ -15,6 +16,7 @@ export function ChatInput({
   disabled: boolean;
   isStreaming: boolean;
   humanMode?: boolean;
+  whatsappMode?: boolean;
   onAbort: () => void | Promise<void>;
   branding: WidgetBranding;
 }) {
@@ -62,6 +64,17 @@ export function ChatInput({
           {branding.humanModeBannerText}
         </div>
       )}
+      {!humanMode && whatsappMode && (
+        <div
+          className="px-4 py-2 text-center text-xs font-medium"
+          style={{
+            backgroundColor: "color-mix(in srgb, var(--widget-success) 12%, white 88%)",
+            color: "var(--widget-success)",
+          }}
+        >
+          {branding.whatsappModeBannerText}
+        </div>
+      )}
 
       <div className="flex items-end gap-2 p-3">
         <textarea
@@ -70,7 +83,13 @@ export function ChatInput({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={humanMode ? "Chatting with a human agent..." : branding.inputPlaceholder}
+          placeholder={
+            humanMode
+              ? "Chatting with a human agent..."
+              : whatsappMode
+                ? "Continue on WhatsApp..."
+                : branding.inputPlaceholder
+          }
           disabled={disabled}
           rows={1}
           className="flex-1 resize-none rounded-xl px-4 py-2.5 text-[15px] leading-relaxed placeholder:text-gray-400 disabled:opacity-50"

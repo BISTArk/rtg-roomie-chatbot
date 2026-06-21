@@ -10,7 +10,7 @@
   assign bg_primary_text = block.settings.bg_primary_text | default: accent_text
   assign bg_secondary = block.settings.bg_secondary | default: '#ece9e2'
   assign bg_secondary_text = block.settings.bg_secondary_text | default: '#1a1a1a'
-  assign app_base_url = 'https://ai-shop-assist.vercel.app'
+  assign app_base_url = '__SHOP_ASSIST_APP_BASE_URL__'
 %}
 
 {% if app_base_url != blank %}

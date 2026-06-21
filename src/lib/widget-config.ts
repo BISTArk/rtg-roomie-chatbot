@@ -33,6 +33,9 @@ export interface WidgetBranding {
   headerTitle: string;
   inputPlaceholder: string;
   humanModeBannerText: string;
+  whatsappButtonLabel: string;
+  whatsappModeBannerText: string;
+  whatsappConsentText: string;
   quickChips: string[];
   logoMode: LogoMode;
   logoUrl?: string;
@@ -83,6 +86,11 @@ export const DEFAULT_WIDGET_BRANDING: WidgetBranding = {
   inputPlaceholder: "Ask about mattresses...",
   humanModeBannerText:
     "You are now connected to a human agent. Refresh to resume AI assistant.",
+  whatsappButtonLabel: "Continue on WhatsApp",
+  whatsappModeBannerText:
+    "This chat continues on WhatsApp. Reply there to keep shopping with us.",
+  whatsappConsentText:
+    "I agree to receive WhatsApp messages to continue this shopping conversation.",
   quickChips: [
     "Help me find the right fit",
     "My back has been hurting",
@@ -124,6 +132,11 @@ export const SHOP_ASSIST_WIDGET_BRANDING: WidgetBranding = {
   inputPlaceholder: "Ask about mattresses...",
   humanModeBannerText:
     "You are now connected to a human agent. Refresh to resume AI assistant.",
+  whatsappButtonLabel: "Continue on WhatsApp",
+  whatsappModeBannerText:
+    "This chat continues on WhatsApp. Reply there to keep shopping with us.",
+  whatsappConsentText:
+    "I agree to receive WhatsApp messages to continue this shopping conversation.",
   quickChips: [
     "Help me find the right fit",
     "My back has been hurting",
@@ -211,6 +224,18 @@ function sanitizeBranding(branding: unknown): Partial<WidgetBranding> {
     humanModeBannerText: pickString(
       record.humanModeBannerText,
       DEFAULT_WIDGET_BRANDING.humanModeBannerText
+    ),
+    whatsappButtonLabel: pickString(
+      record.whatsappButtonLabel,
+      DEFAULT_WIDGET_BRANDING.whatsappButtonLabel
+    ),
+    whatsappModeBannerText: pickString(
+      record.whatsappModeBannerText,
+      DEFAULT_WIDGET_BRANDING.whatsappModeBannerText
+    ),
+    whatsappConsentText: pickString(
+      record.whatsappConsentText,
+      DEFAULT_WIDGET_BRANDING.whatsappConsentText
     ),
     quickChips: pickStringArray(record.quickChips, DEFAULT_WIDGET_BRANDING.quickChips),
     logoMode: pickLogoMode(record.logoMode, DEFAULT_WIDGET_BRANDING.logoMode),

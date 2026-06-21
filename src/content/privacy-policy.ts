@@ -55,6 +55,7 @@ export const PRIVACY_POLICY_SECTIONS: PrivacyPolicySection[] = [
     ],
     bullets: [
       "Identifiers and session data: browser-generated session IDs, host website origin, timestamps, and similar technical identifiers stored in local storage or session storage.",
+      "Contact information: phone numbers you provide when choosing to continue a shopping conversation on WhatsApp, plus consent timestamps for that channel.",
       "Customer communications: messages you send to the assistant, assistant responses, conversation history within a session, and suggested follow-up actions.",
       "Commercial and browsing information: pages viewed, product names, prices, categories, cart contents, search queries, and other shopping activity shared with the widget by the merchant's storefront.",
       "Inferences and preferences: visit counts, viewed products and categories, stated shopping preferences, and products added to cart or purchased when that information is available from the storefront context.",
@@ -72,6 +73,7 @@ export const PRIVACY_POLICY_SECTIONS: PrivacyPolicySection[] = [
       "Provide, operate, troubleshoot, and improve Shop Assist.",
       "Generate product recommendations, comparisons, and other AI-assisted responses.",
       "Maintain conversation history and suggested follow-up actions during a session.",
+      "Continue shopping conversations on WhatsApp when you choose that option and provide a phone number.",
       "Sync merchant product catalogs and display accurate product information.",
       "Detect abuse, protect security, and maintain service reliability.",
       "Comply with law and respond to valid legal and merchant-initiated data requests.",

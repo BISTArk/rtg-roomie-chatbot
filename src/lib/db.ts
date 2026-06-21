@@ -343,6 +343,26 @@ export async function ensurePlatformSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_share_links_expires_at
           ON share_links(expires_at);
 
+        CREATE TABLE IF NOT EXISTS whatsapp_links (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+          client_session_id TEXT NOT NULL,
+          phone_e164 TEXT NOT NULL,
+          active_channel TEXT NOT NULL DEFAULT 'whatsapp',
+          consent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_inbound_at TIMESTAMPTZ,
+          last_outbound_at TIMESTAMPTZ,
+          UNIQUE (tenant_id, phone_e164),
+          UNIQUE (tenant_id, client_session_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_links_phone
+          ON whatsapp_links(tenant_id, phone_e164);
+
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_links_session
+          ON whatsapp_links(tenant_id, client_session_id);
+
         CREATE TABLE IF NOT EXISTS shopify_installations (
           id TEXT PRIMARY KEY,
           tenant_id TEXT NOT NULL UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,

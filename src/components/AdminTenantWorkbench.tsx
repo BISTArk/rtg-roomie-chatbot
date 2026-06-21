@@ -60,6 +60,9 @@ type PromptEditorDraft = {
   supportUrl: string;
   storeLocatorUrl: string;
   handoffDescription: string;
+  whatsappEnabled: boolean;
+  whatsappFromNumber: string;
+  whatsappHandoffMessage: string;
   systemPrompt: string;
   skillPrompts: Record<string, string>;
 };
@@ -125,6 +128,9 @@ function buildPromptEditorDraft(tenant: TenantRecord): PromptEditorDraft {
     supportUrl: tenant.prompt.supportUrl || "",
     storeLocatorUrl: tenant.prompt.storeLocatorUrl || "",
     handoffDescription: tenant.prompt.handoffDescription || "",
+    whatsappEnabled: Boolean(tenant.prompt.whatsappEnabled),
+    whatsappFromNumber: tenant.prompt.whatsappFromNumber || "",
+    whatsappHandoffMessage: tenant.prompt.whatsappHandoffMessage || "",
     systemPrompt: tenant.systemPrompt || "",
     skillPrompts: PROMPT_SKILL_CONFIG.reduce<Record<string, string>>((accumulator, { name }) => {
       accumulator[name] = tenant.skillPrompts[name] || "";
@@ -394,6 +400,47 @@ export default function AdminTenantWorkbench({ tenantDetails }: { tenantDetails:
                   <Input name="supportUrl" value={promptDraft.supportUrl} onChange={(event) => setPromptDraft((current) => current ? { ...current, supportUrl: event.target.value } : current)} placeholder="Support URL" />
                   <Input name="storeLocatorUrl" value={promptDraft.storeLocatorUrl} onChange={(event) => setPromptDraft((current) => current ? { ...current, storeLocatorUrl: event.target.value } : current)} placeholder="Store locator URL" />
                   <Input name="handoffDescription" value={promptDraft.handoffDescription} onChange={(event) => setPromptDraft((current) => current ? { ...current, handoffDescription: event.target.value } : current)} placeholder="Human handoff description" className="md:col-span-2" />
+                </FieldGrid>
+              </FormSection>
+
+              <FormSection value="integrations" title="WhatsApp" description="Enable Continue on WhatsApp for this tenant. Requires Twilio env vars on the deployment.">
+                <FieldGrid>
+                  <label className="flex items-center gap-2 text-sm text-[var(--widget-text)]">
+                    <input
+                      type="checkbox"
+                      name="whatsappEnabled"
+                      value="1"
+                      checked={promptDraft.whatsappEnabled}
+                      onChange={(event) =>
+                        setPromptDraft((current) =>
+                          current ? { ...current, whatsappEnabled: event.target.checked } : current
+                        )
+                      }
+                    />
+                    Enable Continue on WhatsApp
+                  </label>
+                  <Input
+                    name="whatsappFromNumber"
+                    value={promptDraft.whatsappFromNumber}
+                    onChange={(event) =>
+                      setPromptDraft((current) =>
+                        current ? { ...current, whatsappFromNumber: event.target.value } : current
+                      )
+                    }
+                    placeholder="Optional per-tenant sender, e.g. whatsapp:+14155238886"
+                    className="md:col-span-2"
+                  />
+                  <Input
+                    name="whatsappHandoffMessage"
+                    value={promptDraft.whatsappHandoffMessage}
+                    onChange={(event) =>
+                      setPromptDraft((current) =>
+                        current ? { ...current, whatsappHandoffMessage: event.target.value } : current
+                      )
+                    }
+                    placeholder="Optional handoff template with {{assistantName}} and {{summary}}"
+                    className="md:col-span-2"
+                  />
                 </FieldGrid>
               </FormSection>
 

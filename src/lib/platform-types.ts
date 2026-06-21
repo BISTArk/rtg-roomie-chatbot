@@ -34,6 +34,9 @@ export interface TenantPromptConfig {
   supportUrl?: string;
   storeLocatorUrl?: string;
   handoffDescription?: string;
+  whatsappEnabled?: boolean;
+  whatsappFromNumber?: string;
+  whatsappHandoffMessage?: string;
 }
 
 export interface TenantRuntimeConfig {
@@ -63,6 +66,7 @@ export interface SessionState {
   visitorProfile: VisitorProfile | null;
   suggestions?: string[];
   updatedAt?: string;
+  whatsappLinked?: boolean;
 }
 
 export interface SessionHistoryItem {
@@ -78,6 +82,7 @@ export interface TenantBootstrap {
   tenant: TenantRuntimeConfig;
   tenantToken: string;
   session: SessionState;
+  twilioWhatsAppConfigured: boolean;
 }
 
 export interface CatalogDataset {

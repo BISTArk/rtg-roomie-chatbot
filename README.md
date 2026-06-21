@@ -29,7 +29,22 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
+## Continue on WhatsApp
+
+Set these environment variables (see `.env.example`):
+
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_WHATSAPP_FROM` (e.g. `whatsapp:+14155238886`)
+- `TWILIO_WEBHOOK_BASE_URL` (public app URL used for webhook signature validation)
+
+Then in the admin tenant prompt editor, enable **Continue on WhatsApp** for the tenant you want to test.
+
+Twilio console:
+
+1. Point the WhatsApp sandbox/production number webhook to `POST /api/whatsapp/webhook` on your deployed app.
+2. Sandbox testers must join the Twilio sandbox before messages deliver.
+
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 

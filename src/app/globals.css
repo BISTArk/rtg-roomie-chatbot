@@ -110,6 +110,7 @@ body {
 html.embed-chat-root,
 body.embed-chat-root {
   background: transparent !important;
+  height: 100%;
   min-height: 100%;
   pointer-events: none;
   overscroll-behavior: contain;
@@ -239,11 +240,9 @@ body.embed-chat-root {
 @keyframes widgetOpen {
   from {
     opacity: 0;
-    transform: scale(0.95);
   }
   to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 

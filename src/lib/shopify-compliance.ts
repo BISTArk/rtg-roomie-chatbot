@@ -1,5 +1,8 @@
 import { hasDatabase, withDb } from "@/lib/db";
 import { getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
+import {
+  deleteWhatsAppLinksByPhone,
+} from "@/lib/whatsapp-links";
 
 type ShopifyCustomerPayload = {
   id?: number;
@@ -180,6 +183,11 @@ async function deleteCustomerSessions(input: {
           [input.tenantId, sessionId]
         );
       }
+      await client.query(
+        `DELETE FROM whatsapp_links
+         WHERE tenant_id = $1 AND client_session_id = ANY($2::text[])`,
+        [input.tenantId, sessionIds]
+      );
       await client.query("COMMIT");
       return sessionIds.length;
     } catch (error) {
@@ -231,12 +239,18 @@ export async function handleShopifyCustomerRedact(
       ? await deleteCustomerSessions({ tenantId, searchTerms })
       : 0;
 
+  const redactedWhatsAppCount =
+    tenantId && searchTerms.length
+      ? await deleteWhatsAppLinksByPhone({ tenantId, phoneTerms: searchTerms })
+      : 0;
+
   console.log("[shopify compliance] customers/redact", {
     shopDomain,
     shopId: payload.shop_id,
     customerId: payload.customer?.id ?? null,
     customerEmail: payload.customer?.email ?? null,
     redactedSessionCount,
+    redactedWhatsAppCount,
   });
 
   return { redactedSessionCount };
