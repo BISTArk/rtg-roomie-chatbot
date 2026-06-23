@@ -1,7 +1,6 @@
 "use client";
 
 import { Clock3, Heart, MessageCircle, Minus, RefreshCw } from "lucide-react";
-import { WidgetAvatar } from "./WidgetAvatar";
 import type { WidgetBranding, WidgetTheme } from "@/lib/widget-config";
 
 export function ChatHeader({
@@ -15,7 +14,6 @@ export function ChatHeader({
   onContinueWhatsApp,
   showWhatsAppButton,
   branding,
-  theme,
 }: {
   onMinimize: () => void;
   onRefresh: () => void;
@@ -29,21 +27,32 @@ export function ChatHeader({
   branding: WidgetBranding;
   theme: WidgetTheme;
 }) {
+  const iconBaseStyle = {
+    color: "var(--widget-primary-text)",
+    backgroundColor: "transparent",
+  } as const;
+
+  const hoverBg = "color-mix(in srgb, var(--widget-primary-text) 16%, transparent)";
+  const activeBg = "color-mix(in srgb, var(--widget-primary-text) 24%, transparent)";
+
   return (
     <div
-      className="flex h-14 shrink-0 items-center justify-between border-b px-4"
+      className="flex min-h-16 shrink-0 items-center justify-between border-b px-4 py-3"
       style={{
-        backgroundColor: "var(--widget-surface)",
-        borderColor: "var(--widget-border)",
+        backgroundColor: "var(--widget-primary)",
+        borderColor: "var(--widget-primary)",
+        color: "var(--widget-primary-text)",
       }}
     >
-      <div className="flex items-center gap-2.5">
-        <WidgetAvatar size={32} branding={branding} theme={theme} />
-        <span
-          className="text-sm font-semibold"
-          style={{ color: "var(--widget-text)" }}
-        >
+      <div className="flex flex-col gap-0.5">
+        <span className="text-lg font-semibold leading-tight">
           {branding.headerTitle}
+        </span>
+        <span
+          className="text-xs leading-tight opacity-80"
+          style={{ color: "var(--widget-primary-text)" }}
+        >
+          {branding.headerSubtitle}
         </span>
       </div>
 
@@ -52,11 +61,11 @@ export function ChatHeader({
           <button
             onClick={onContinueWhatsApp}
             className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
-            style={{ color: "var(--widget-success)" }}
+            style={iconBaseStyle}
             aria-label={branding.whatsappButtonLabel}
             title={branding.whatsappButtonLabel}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
+              e.currentTarget.style.backgroundColor = hoverBg;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.backgroundColor = "transparent";
@@ -68,16 +77,14 @@ export function ChatHeader({
         <button
           onClick={onRefresh}
           className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
-          style={{ color: "var(--widget-text-muted)" }}
+          style={iconBaseStyle}
           aria-label="New conversation"
           title="New conversation"
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
-            e.currentTarget.style.color = "var(--widget-text)";
+            e.currentTarget.style.backgroundColor = hoverBg;
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.color = "var(--widget-text-muted)";
           }}
         >
           <RefreshCw size={16} />
@@ -85,13 +92,17 @@ export function ChatHeader({
         <button
           onClick={onToggleFavourites}
           className={`relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--widget-danger)] transition-colors ${
-            isFavouritesOpen ? "bg-[var(--widget-danger)]/10" : ""
+            isFavouritesOpen ? "" : ""
           }`}
+          style={{
+            ...iconBaseStyle,
+            backgroundColor: isFavouritesOpen ? activeBg : "transparent",
+          }}
           aria-label="Favourites"
           title="Favourites"
           onMouseEnter={(e) => {
             if (isFavouritesOpen) return;
-            e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
+            e.currentTarget.style.backgroundColor = hoverBg;
           }}
           onMouseLeave={(e) => {
             if (isFavouritesOpen) return;
@@ -107,23 +118,20 @@ export function ChatHeader({
         </button>
         <button
           onClick={onToggleHistory}
-          className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-            isHistoryOpen
-              ? "bg-[var(--widget-accent)]/10 text-[var(--widget-accent)]"
-              : ""
-          }`}
-          style={{ color: isHistoryOpen ? undefined : "var(--widget-text-muted)" }}
+          className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
+          style={{
+            ...iconBaseStyle,
+            backgroundColor: isHistoryOpen ? activeBg : "transparent",
+          }}
           aria-label="Chat history"
           title="Chat history"
           onMouseEnter={(e) => {
             if (isHistoryOpen) return;
-            e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
-            e.currentTarget.style.color = "var(--widget-text)";
+            e.currentTarget.style.backgroundColor = hoverBg;
           }}
           onMouseLeave={(e) => {
             if (isHistoryOpen) return;
             e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.color = "var(--widget-text-muted)";
           }}
         >
           <Clock3 size={16} />
@@ -131,16 +139,14 @@ export function ChatHeader({
         <button
           onClick={onMinimize}
           className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
-          style={{ color: "var(--widget-text-muted)" }}
+          style={iconBaseStyle}
           aria-label={`Minimize ${branding.headerTitle}`}
           title="Minimize chat"
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "var(--widget-surface-alt)";
-            e.currentTarget.style.color = "var(--widget-text)";
+            e.currentTarget.style.backgroundColor = hoverBg;
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.color = "var(--widget-text-muted)";
           }}
         >
           <Minus size={18} />

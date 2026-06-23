@@ -126,19 +126,22 @@ body.embed-chat-root {
     animation: widgetOpen 250ms ease-out;
   }
 
+  .launcher-enter {
+    animation: launcherIn 520ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
   .interjection-enter {
     animation: peekAttentionIn 520ms cubic-bezier(0.22, 1.12, 0.36, 1);
   }
 
   .launcher-attention {
     animation:
-      launcherPop 640ms cubic-bezier(0.34, 1.45, 0.64, 1),
-      launcherPulse 2.2s ease-in-out 640ms infinite;
-    transform: scale(1.03);
+      launcherPop 520ms cubic-bezier(0.34, 1.45, 0.64, 1),
+      launcherPulse 1.6s ease-out 520ms infinite;
   }
 
   .launcher-attention-badge {
-    animation: launcherBadgePop 640ms cubic-bezier(0.34, 1.45, 0.64, 1);
+    animation: launcherBadgePop 520ms cubic-bezier(0.34, 1.45, 0.64, 1);
   }
 }
 
@@ -197,28 +200,34 @@ body.embed-chat-root {
   0% {
     transform: scale(1);
   }
-  35% {
-    transform: scale(1.1);
-  }
-  65% {
-    transform: scale(0.97);
+  45% {
+    transform: scale(1.07);
   }
   100% {
-    transform: scale(1.03);
+    transform: scale(1);
   }
 }
 
 @keyframes launcherPulse {
-  0%,
+  0% {
+    box-shadow:
+      var(--widget-shadow),
+      0 0 0 0 transparent;
+  }
+  30% {
+    box-shadow:
+      var(--widget-shadow),
+      0 0 0 8px color-mix(in srgb, var(--widget-accent) 45%, transparent);
+  }
+  60% {
+    box-shadow:
+      var(--widget-shadow),
+      0 0 0 14px color-mix(in srgb, var(--widget-accent) 18%, transparent);
+  }
   100% {
     box-shadow:
       var(--widget-shadow),
-      0 0 0 0 color-mix(in srgb, var(--widget-accent) 42%, transparent);
-  }
-  50% {
-    box-shadow:
-      var(--widget-shadow),
-      0 0 0 10px transparent;
+      0 0 0 18px transparent;
   }
 }
 
@@ -243,6 +252,20 @@ body.embed-chat-root {
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes launcherIn {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.75);
+  }
+  60% {
+    transform: translateY(-4px) scale(1.06);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
