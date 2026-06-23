@@ -103,10 +103,10 @@ function QuickSuggestions({
         <Button
           key={suggestion}
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           disabled={disabled}
-          className={suggestionButtonClassName}
+          className={cn(suggestionButtonClassName, "border-transparent hover:border-transparent")}
           onClick={() => onSelect(suggestion)}
         >
           {suggestion}
@@ -135,9 +135,9 @@ function NextQuestionSuggestions({
         <Button
           key={suggestion}
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
-          className={cn(suggestionButtonClassName, "text-left")}
+          className={cn(suggestionButtonClassName, "text-left border-transparent hover:border-transparent")}
           onClick={() => onSelect(suggestion)}
         >
           {suggestion}

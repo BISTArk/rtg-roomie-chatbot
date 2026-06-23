@@ -103,6 +103,7 @@ function sanitizeForModel(
                 : "Shopping Assistant",
             launcherLabel: "",
             headerTitle: "",
+            headerSubtitle: "",
             inputPlaceholder: "",
             humanModeBannerText: "",
             whatsappModeBannerText: "",

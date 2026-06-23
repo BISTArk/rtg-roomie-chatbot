@@ -9,7 +9,7 @@ import {
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
-import { ArrowRightLeft, X } from "lucide-react";
+import { ArrowRightLeft, MessagesSquare, X } from "lucide-react";
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { flushSync } from "react-dom";
 import { ChatHeader } from "./ChatHeader";
@@ -2385,42 +2385,29 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
           <button
             ref={launcherRef}
             onClick={handleOpen}
-            className={`fixed bottom-4 z-50 flex items-center gap-2.5 rounded-full px-4 py-3 shadow-lg transition-[transform,box-shadow,border-color] duration-300 hover:scale-[1.05] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 ${embed ? embedLauncherClass : launcherPositionClass} ${embed ? "pointer-events-auto max-w-[calc(100%-16px)]" : ""} ${launcherAttention ? "launcher-attention border-2" : ""}`}
+            className={`fixed bottom-4 z-50 flex size-14 items-center justify-center rounded-full shadow-lg transition-all duration-300 ease-out hover:scale-[1.08] focus-visible:outline-2 focus-visible:outline-offset-2 sm:bottom-6 sm:size-16 ${embed ? embedLauncherClass : launcherPositionClass} ${embed ? "pointer-events-auto max-w-[calc(100%-16px)]" : ""} ${launcherAttention ? "launcher-attention border-2" : ""} launcher-enter`}
             style={{
-              backgroundColor: "var(--widget-surface)",
-              color: "var(--widget-text)",
-              borderColor: launcherAttention ? "var(--widget-accent)" : "var(--widget-border)",
+              backgroundColor: "var(--widget-accent)",
+              color: "var(--widget-accent-text)",
+              borderColor: launcherAttention ? "var(--widget-accent)" : "transparent",
               boxShadow: launcherAttention
                 ? "var(--widget-shadow), 0 8px 28px color-mix(in srgb, var(--widget-accent) 28%, transparent)"
                 : "var(--widget-shadow)",
             }}
             aria-label={`Open ${widgetConfig.branding.launcherLabel}`}
           >
-            <span className="relative shrink-0">
-              <WidgetAvatar
-                size={32}
-                branding={widgetConfig.branding}
-                theme={widgetConfig.theme}
-              />
-              {launcherAttention ? (
+            <MessagesSquare size={28} className="sm:size-[32px]" />
+            {launcherAttention ? (
+              <span
+                aria-hidden
+                className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white"
+              >
                 <span
-                  aria-hidden
-                  className="launcher-attention-badge absolute -right-0.5 -top-0.5 flex h-3 w-3 items-center justify-center rounded-full"
+                  className="block h-2 w-2 rounded-full"
                   style={{ backgroundColor: "var(--widget-accent)" }}
-                >
-                  <span
-                    className="block h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: "var(--widget-accent-text)" }}
-                  />
-                </span>
-              ) : null}
-            </span>
-            <span
-              className="text-sm font-semibold"
-              style={{ color: "var(--widget-text)" }}
-            >
-              {widgetConfig.branding.launcherLabel}
-            </span>
+                />
+              </span>
+            ) : null}
           </button>
         </>
       )}

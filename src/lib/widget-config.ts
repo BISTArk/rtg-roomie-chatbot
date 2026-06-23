@@ -31,6 +31,7 @@ export interface WidgetBranding {
   assistantName: string;
   launcherLabel: string;
   headerTitle: string;
+  headerSubtitle: string;
   inputPlaceholder: string;
   humanModeBannerText: string;
   whatsappButtonLabel: string;
@@ -83,6 +84,7 @@ export const DEFAULT_WIDGET_BRANDING: WidgetBranding = {
   assistantName: "Shopping Assistant",
   launcherLabel: "Shopping Assistant",
   headerTitle: "Shopping Assistant",
+  headerSubtitle: "I am your AI shopping assistant",
   inputPlaceholder: "Ask about mattresses...",
   humanModeBannerText:
     "You are now connected to a human agent. Refresh to resume AI assistant.",
@@ -129,6 +131,7 @@ export const SHOP_ASSIST_WIDGET_BRANDING: WidgetBranding = {
   assistantName: "Shop Assist",
   launcherLabel: "Shop Assist",
   headerTitle: "Shop Assist",
+  headerSubtitle: "I am your AI shopping assistant",
   inputPlaceholder: "Ask about mattresses...",
   humanModeBannerText:
     "You are now connected to a human agent. Refresh to resume AI assistant.",
@@ -220,6 +223,7 @@ function sanitizeBranding(branding: unknown): Partial<WidgetBranding> {
     assistantName: pickString(record.assistantName, DEFAULT_WIDGET_BRANDING.assistantName),
     launcherLabel: pickString(record.launcherLabel, DEFAULT_WIDGET_BRANDING.launcherLabel),
     headerTitle: pickString(record.headerTitle, DEFAULT_WIDGET_BRANDING.headerTitle),
+    headerSubtitle: pickString(record.headerSubtitle, DEFAULT_WIDGET_BRANDING.headerSubtitle),
     inputPlaceholder: pickString(record.inputPlaceholder, DEFAULT_WIDGET_BRANDING.inputPlaceholder),
     humanModeBannerText: pickString(
       record.humanModeBannerText,
