@@ -374,6 +374,21 @@ export function buildShopifyResyncCatalogUrl(appUrl: string, shop: string): stri
   return `${appUrl.replace(/\/+$/, "")}/shopify/installed?shop=${encodeURIComponent(shop)}&resync=1`;
 }
 
+export function buildShopifyThemeEditorAppEmbedUrl(input: {
+  shop: string;
+  apiKey: string;
+  blockHandle?: string;
+}): string {
+  const shop = normalizeShopifyShopDomain(input.shop);
+  const apiKey = input.apiKey.trim();
+  if (!shop || !apiKey) return "";
+
+  const storeHandle = shop.replace(/\.myshopify\.com$/, "");
+  const blockHandle = input.blockHandle?.trim() || "shop-assist";
+  const params = new URLSearchParams({ context: "apps" });
+  return `https://admin.shopify.com/store/${encodeURIComponent(storeHandle)}/themes/current/editor?${params.toString()}&activateAppId=${encodeURIComponent(apiKey)}/${encodeURIComponent(blockHandle)}`;
+}
+
 export function normalizeShopifyShopDomain(input: string | null | undefined): string {
   const value = String(input || "").trim().toLowerCase();
   if (!value) return "";

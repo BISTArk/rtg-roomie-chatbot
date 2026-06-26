@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import type { PoolClient } from "pg";
 import { DEFAULT_WIDGET_BRANDING, DEFAULT_WIDGET_THEME, SHOP_ASSIST_WIDGET_BRANDING, SHOP_ASSIST_WIDGET_THEME } from "@/lib/widget-config";
-import { buildFullCatalogSnapshot } from "@/lib/tenant-catalog";
 import { ensurePlatformSchema, hasDatabase, withDb } from "@/lib/db";
 import { createTenantToken, normalizeHostname, normalizeOrigin, verifyTenantToken } from "@/lib/platform-security";
 import { normalizeShopifyShopDomain } from "@/lib/shopify";
@@ -55,13 +54,40 @@ const DEFAULT_SEEDED_SKILL_PROMPTS = getDefaultSkillRegistry().reduce<TenantSkil
   {}
 );
 
+function hostnameFromAppUrl(value: string | null | undefined): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    return new URL(raw.includes("://") ? raw : `https://${raw}`).hostname.toLowerCase();
+  } catch {
+    return raw
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "")
+      .trim()
+      .toLowerCase();
+  }
+}
+
+function uniqueHostnames(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))];
+}
+
+const DEFAULT_TENANT_ALLOWED_DOMAINS = uniqueHostnames([
+  "localhost",
+  "127.0.0.1",
+  "ai-shop-assist.vercel.app",
+  hostnameFromAppUrl(process.env.SHOPIFY_APP_URL),
+  hostnameFromAppUrl(process.env.VERCEL_URL),
+]);
+
 const FALLBACK_TENANT: TenantRecord = {
   tenantId: "tenant_local_shop_assist",
   tenantKey: DEFAULT_TENANT_KEY,
   name: "Shop Assist Demo",
   storageNamespace: "shop-assist-demo",
   appName: "Shop Assist",
-  appUrl: "https://example.com",
+  appUrl: process.env.SHOPIFY_APP_URL?.trim() || "https://ai-shop-assist.vercel.app",
   theme: SHOP_ASSIST_WIDGET_THEME,
   branding: SHOP_ASSIST_WIDGET_BRANDING,
   prompt: {
@@ -73,7 +99,7 @@ const FALLBACK_TENANT: TenantRecord = {
   },
   systemPrompt: DEFAULT_SEEDED_SYSTEM_PROMPT,
   skillPrompts: DEFAULT_SEEDED_SKILL_PROMPTS,
-  allowedDomains: ["localhost", "127.0.0.1"],
+  allowedDomains: DEFAULT_TENANT_ALLOWED_DOMAINS,
   shopifyInstallation: null,
   createdAt: new Date(0).toISOString(),
   updatedAt: new Date(0).toISOString(),
@@ -501,6 +527,7 @@ async function runDefaultTenantSeed(): Promise<void> {
         `SELECT id FROM tenants WHERE tenant_key = $1 LIMIT 1`,
         [DEFAULT_TENANT_KEY]
       );
+      let defaultTenantId = existing.rows[0]?.id || "";
       if (existing.rows.length === 0) {
         const tenantId = randomUUID();
         await client.query(
@@ -528,18 +555,10 @@ async function runDefaultTenantSeed(): Promise<void> {
           `SELECT id FROM tenants WHERE tenant_key = $1 LIMIT 1`,
           [DEFAULT_TENANT_KEY]
         );
-        const seededTenantId = seededTenant.rows[0]?.id;
-        if (!seededTenantId) {
+        defaultTenantId = seededTenant.rows[0]?.id || "";
+        if (!defaultTenantId) {
           await client.query("COMMIT");
           return;
-        }
-
-        for (const hostname of FALLBACK_TENANT.allowedDomains) {
-          await client.query(
-            `INSERT INTO tenant_domains (id, tenant_id, hostname) VALUES ($1, $2, $3)
-             ON CONFLICT (tenant_id, hostname) DO NOTHING`,
-            [randomUUID(), seededTenantId, hostname]
-          );
         }
 
         const fullExecution = await queryFullCatalog();
@@ -574,13 +593,23 @@ async function runDefaultTenantSeed(): Promise<void> {
           }),
         };
         await insertCatalogVersion(client, {
-          tenantId: seededTenantId,
+          tenantId: defaultTenantId,
           sourceId: null,
           sourceType: "excel",
           label: "Seeded RTG catalog",
           dataset,
           activate: true,
         });
+      }
+
+      if (defaultTenantId) {
+        for (const hostname of FALLBACK_TENANT.allowedDomains) {
+          await client.query(
+            `INSERT INTO tenant_domains (id, tenant_id, hostname) VALUES ($1, $2, $3)
+             ON CONFLICT (tenant_id, hostname) DO NOTHING`,
+            [randomUUID(), defaultTenantId, hostname]
+          );
+        }
       }
 
       await seedTenantPromptDefaults(client);

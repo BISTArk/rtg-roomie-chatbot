@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import {
   buildShopifyResyncCatalogUrl,
+  buildShopifyThemeEditorAppEmbedUrl,
   getShopifyAppConfig,
   normalizeShopifyShopDomain,
 } from "@/lib/shopify";
@@ -54,7 +55,7 @@ export default async function ShopifyInstalledPage({
   }
 
   let catalogSync = params.catalogSync || "";
-  let catalogSyncError = params.catalogSyncError || "";
+  const catalogSyncError = params.catalogSyncError || "";
 
   if (tenant?.shopifyInstallation?.status === "installed") {
     const existingCatalog = await getActiveCatalogDataset(tenant.tenantId);
@@ -71,8 +72,11 @@ export default async function ShopifyInstalledPage({
   const tenantKey = tenant?.tenantKey || "";
   const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
   const enableEmbedUrl =
-    shopifyApiKey && shop && shop !== "your Shopify store"
-      ? `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${encodeURIComponent(shopifyApiKey)}/shop-assist`
+    shop && shop !== "your Shopify store"
+      ? buildShopifyThemeEditorAppEmbedUrl({
+          shop,
+          apiKey: shopifyApiKey,
+        })
       : "";
 
   const reinstallUrl =

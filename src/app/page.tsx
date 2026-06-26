@@ -5,7 +5,12 @@ import { MockContextPanel } from "@/components/MockContextPanel";
 import { ShopifyAuthRedirect } from "@/components/ShopifyAuthRedirect";
 import { ShopifyInstalledView } from "@/components/ShopifyInstalledView";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
-import { getShopifyAppConfig, normalizeShopifyShopDomain, buildShopifyResyncCatalogUrl } from "@/lib/shopify";
+import {
+  buildShopifyResyncCatalogUrl,
+  buildShopifyThemeEditorAppEmbedUrl,
+  getShopifyAppConfig,
+  normalizeShopifyShopDomain,
+} from "@/lib/shopify";
 import { ensureTenantShopifyCatalogSynced } from "@/lib/shopify-catalog-sync";
 import { getActiveCatalogDataset, getTenantByShopifyShopDomain } from "@/lib/tenant-platform";
 
@@ -51,10 +56,10 @@ export default async function Home({
     const adminAuthenticated = await isAdminAuthenticated();
     const tenantKey = adminAuthenticated ? tenant.tenantKey : "";
     const shopifyApiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
-    const enableEmbedUrl =
-      shopifyApiKey
-        ? `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${encodeURIComponent(shopifyApiKey)}/shop-assist`
-        : "";
+    const enableEmbedUrl = buildShopifyThemeEditorAppEmbedUrl({
+      shop,
+      apiKey: shopifyApiKey,
+    });
     const reinstallUrl = `${appConfig.appUrl}/api/shopify/install?shop=${encodeURIComponent(shop)}`;
     const resyncCatalogUrl = buildShopifyResyncCatalogUrl(appConfig.appUrl, shop);
 

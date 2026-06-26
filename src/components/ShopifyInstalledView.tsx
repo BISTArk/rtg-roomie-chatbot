@@ -61,11 +61,22 @@ export function ShopifyInstalledView({
             Connecting your product catalog in the background...
           </p>
         ) : null}
-        {enableEmbedUrl ? (
-          <p className="mt-3 text-sm" style={{ color: "var(--widget-text-muted)" }}>
-            Next, enable the chatbot app embed in the theme editor.
+        <div className="mt-5 rounded-2xl border p-4 text-sm" style={{ borderColor: "var(--widget-border)", color: "var(--widget-text-muted)" }}>
+          <p className="font-semibold" style={{ color: "var(--widget-text)" }}>
+            Enable the storefront chatbot
           </p>
-        ) : null}
+          <ol className="mt-3 list-decimal space-y-2 pl-5">
+            <li>Open Shopify Admin and go to Online Store, then Themes.</li>
+            <li>Click Customize on the live theme.</li>
+            <li>Open App embeds and turn on Shop Assist.</li>
+            <li>Click Save, then preview the storefront.</li>
+          </ol>
+          {enableEmbedUrl ? (
+            <p className="mt-3">
+              The theme editor link below opens this screen directly when Shopify supports the shortcut.
+            </p>
+          ) : null}
+        </div>
         <div className="mt-6 space-y-2 text-sm" style={{ color: "var(--widget-text-muted)" }}>
           <div>Shop: {shop}</div>
         </div>
@@ -95,10 +106,12 @@ export function ShopifyInstalledView({
           {enableEmbedUrl ? (
             <a
               href={enableEmbedUrl}
+              target="_top"
+              rel="noreferrer"
               className="rounded-2xl px-4 py-3 text-sm font-semibold"
               style={{ background: "var(--widget-accent)", color: "var(--widget-accent-text)" }}
             >
-              Enable chatbot in theme editor
+              Open Shopify theme editor
             </a>
           ) : null}
           {adminAuthenticated ? (
