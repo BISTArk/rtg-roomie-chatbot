@@ -45,6 +45,7 @@ export interface WidgetBranding {
 
 export interface ShopAssistChatConfig {
   tenantKey?: string;
+  shopDomain?: string;
   placement?: WidgetPlacement;
   theme?: Partial<WidgetTheme>;
   branding?: Partial<WidgetBranding>;

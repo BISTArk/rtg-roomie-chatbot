@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
   return new Response(body, {
     headers: {
       "Content-Type": "application/javascript; charset=utf-8",
-      "Cache-Control": "public, max-age=60, s-maxage=300",
+      "Cache-Control": "no-store, max-age=0",
     },
   });
 }

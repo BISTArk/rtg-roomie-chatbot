@@ -228,6 +228,17 @@ function getRuntimeTenantKey(): string {
   }
 }
 
+function getRuntimeShopDomain(): string {
+  if (typeof window === "undefined") return "";
+  const configShopDomain = getWindowChatConfig()?.shopDomain?.trim();
+  if (configShopDomain) return configShopDomain;
+  try {
+    return new URLSearchParams(window.location.search).get("shop")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
 function getHostOrigin(): string {
   if (typeof window === "undefined") return "";
   try {
@@ -239,6 +250,7 @@ function getHostOrigin(): string {
 
 async function fetchTenantBootstrap(input: {
   tenantKey: string;
+  shopDomain?: string;
   sessionId: string;
   hostOrigin: string;
   localMessages?: PersistedChatMessage[] | null;
@@ -792,6 +804,8 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
         try {
           const bootstrap = await fetchTenantBootstrap({
             tenantKey: incomingTenantKey,
+            shopDomain:
+              typeof data.shopDomain === "string" ? data.shopDomain : getRuntimeShopDomain(),
             sessionId: incomingSessionId,
             hostOrigin: hostOriginRef.current,
             localMessages: data.chatMessages || null,
@@ -1087,6 +1101,7 @@ export function ChatWidget({ embed = false }: { embed?: boolean } = {}) {
       try {
         const bootstrap = await fetchTenantBootstrap({
           tenantKey: standaloneTenantKey,
+          shopDomain: windowConfig?.shopDomain || getRuntimeShopDomain(),
           sessionId: standaloneSessionId,
           hostOrigin: hostOriginRef.current,
           localMessages,

@@ -575,7 +575,7 @@
 
     // ── Create iframe ──
     var iframe = document.createElement("iframe");
-    iframe.src = origin + "/embed?tenantKey=" + encodeURIComponent(tenantKey);
+    iframe.src = origin + "/embed?tenantKey=" + encodeURIComponent(tenantKey) + "&shop=" + encodeURIComponent(shopDomain);
     iframe.title =
       (widgetConfig.branding && (widgetConfig.branding.headerTitle || widgetConfig.branding.launcherLabel))
       || "Shopping Assistant";
@@ -686,6 +686,7 @@
           privacyAcceptedAt: safeGet(scopedStorageKey(STORAGE.PRIVACY_ACCEPTANCE)),
           proactiveAttemptCount: getProactiveAttemptCount(),
           tenantKey: tenantKey,
+          shopDomain: shopDomain,
           storageNamespace: storageNamespace,
           hostOrigin: window.location.origin,
           theme: widgetConfig.theme,

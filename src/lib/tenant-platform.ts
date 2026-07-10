@@ -1321,15 +1321,74 @@ export async function listTenantSessionAnalyticsPage(
   });
 }
 
+function isTenantHostValidationError(error: unknown): boolean {
+  return error instanceof Error && /Tenant ".+" is not allowed for host ".+"\./.test(error.message);
+}
+
+async function resolveTenantForBootstrap(input: {
+  tenantKey?: string | null;
+  shopDomain?: string | null;
+  hostOrigin?: string | null;
+  skipHostValidation?: boolean;
+}): Promise<TenantRecord> {
+  const tenantKey = String(input.tenantKey || "").trim();
+  const normalizedShopDomain = normalizeShopifyShopDomain(input.shopDomain);
+
+  if (tenantKey) {
+    try {
+      return await resolveTenant(tenantKey, input.hostOrigin, {
+        skipHostValidation: input.skipHostValidation,
+      });
+    } catch (error) {
+      if (!normalizedShopDomain || !isTenantHostValidationError(error)) {
+        throw error;
+      }
+
+      console.warn("[tenant bootstrap] tenant host mismatch; reconciling Shopify shop mapping", {
+        tenantKey,
+        shopDomain: normalizedShopDomain,
+        hostOrigin: input.hostOrigin,
+      });
+    }
+  }
+
+  if (!normalizedShopDomain) {
+    throw new Error("A valid tenant key or Shopify shop domain is required.");
+  }
+
+  const storefrontHostname = normalizeHostname(input.hostOrigin);
+  const tenant = await ensureTenantForShopifyStorefront({
+    shopDomain: normalizedShopDomain,
+    storefrontDomain:
+      storefrontHostname && storefrontHostname !== normalizedShopDomain
+        ? storefrontHostname
+        : null,
+  });
+
+  if (!tenant) {
+    throw new Error(`No tenant mapping found for Shopify shop "${normalizedShopDomain}".`);
+  }
+
+  if (input.skipHostValidation) {
+    return tenant;
+  }
+
+  return resolveTenant(tenant.tenantKey, input.hostOrigin);
+}
+
 export async function bootstrapTenantSession(input: {
   tenantKey: string;
+  shopDomain?: string | null;
   sessionId: string;
   hostOrigin?: string | null;
   localMessages?: PersistedChatMessage[] | null;
   localProfile?: VisitorProfile | null;
   skipHostValidation?: boolean;
 }): Promise<TenantBootstrap> {
-  const tenant = await resolveTenant(input.tenantKey, input.hostOrigin, {
+  const tenant = await resolveTenantForBootstrap({
+    tenantKey: input.tenantKey,
+    shopDomain: input.shopDomain,
+    hostOrigin: input.hostOrigin,
     skipHostValidation: input.skipHostValidation,
   });
   const persisted = await loadSessionState(tenant.tenantId, input.sessionId);
